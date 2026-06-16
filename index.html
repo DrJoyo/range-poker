@@ -299,6 +299,19 @@ body {
 .aBtn-bet, .aBtn-raise { background: #922b21; color: #fff; }
 .aBtn-fold { background: #1a5276; color: #fff; }
 
+#sel-mode-row { display: flex; justify-content: center; gap: 0; }
+.sel-mode-btn {
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  color: #666;
+  padding: 3px 10px;
+  font-size: 0.72em;
+  cursor: pointer;
+}
+.sel-mode-btn:first-child { border-radius: 4px 0 0 4px; border-right: none; }
+.sel-mode-btn:last-child  { border-radius: 0 4px 4px 0; }
+.sel-mode-btn.active { background: #1a5276; color: #ccc; }
+
 .bet-row {
   display: none;
   align-items: center;
@@ -548,6 +561,10 @@ body {
 
       <div id="action-panel" class="hidden">
         <div id="action-prompt">Select hands then click action</div>
+        <div id="sel-mode-row">
+          <button class="sel-mode-btn active" id="mode-rect" onclick="RP.setSelMode('rect')">▭ Rectangle</button>
+          <button class="sel-mode-btn" id="mode-free" onclick="RP.setSelMode('free')">✏ Freehand</button>
+        </div>
         <div class="action-btns" id="abtns"></div>
         <div class="bet-row" id="bet-row">
           <span>Size:</span>
@@ -1074,7 +1091,14 @@ var RP = (function() {
   }
 
   // ---- Drag selection ----
+  var selMode = 'rect'; // 'rect' | 'free'
   var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set() };
+
+  function setSelMode(mode) {
+    selMode = mode;
+    document.getElementById('mode-rect').classList.toggle('active', mode==='rect');
+    document.getElementById('mode-free').classList.toggle('active', mode==='free');
+  }
 
   function renderChartListeners(pid) {
     var chart=$('chart'+pid);
@@ -1098,11 +1122,15 @@ var RP = (function() {
       if (!drag.on||drag.pid!==pid) return;
       var cell=e.target.closest('.hc');
       if (!cell) return;
-      var cr=+cell.dataset.r, cc=+cell.dataset.c;
-      var minR=Math.min(drag.startR,cr), maxR=Math.max(drag.startR,cr);
-      var minC=Math.min(drag.startC,cc), maxC=Math.max(drag.startC,cc);
-      drag.cells=new Set();
-      for(var rr=minR;rr<=maxR;rr++) for(var cc2=minC;cc2<=maxC;cc2++) drag.cells.add(rr+','+cc2);
+      if (selMode==='free') {
+        drag.cells.add(cell.dataset.r+','+cell.dataset.c);
+      } else {
+        var cr=+cell.dataset.r, cc=+cell.dataset.c;
+        var minR=Math.min(drag.startR,cr), maxR=Math.max(drag.startR,cr);
+        var minC=Math.min(drag.startC,cc), maxC=Math.max(drag.startC,cc);
+        drag.cells=new Set();
+        for(var rr=minR;rr<=maxR;rr++) for(var cc2=minC;cc2<=maxC;cc2++) drag.cells.add(rr+','+cc2);
+      }
       refreshDragHighlight();
     });
   }
@@ -1575,6 +1603,7 @@ var RP = (function() {
     spAll: spAll,
     spNone: spNone,
     spClose: spClose,
+    setSelMode: setSelMode,
     _initCharts: initCharts
   };
 })();
