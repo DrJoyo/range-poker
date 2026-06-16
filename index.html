@@ -942,7 +942,6 @@ var RP = (function() {
   }
 
   function advanceStreet() {
-    G.narrowed=[null,null];
     var order=['preflop','flop','turn','river'];
     var idx=order.indexOf(G.street);
     collectBets();
@@ -980,11 +979,9 @@ var RP = (function() {
   function initRange(pid) {
     var facing = isFacing(pid);
     var defAction = facing ? 'fold' : 'check';
-    // Exclude opponent's hole cards and board cards — but NOT this player's own cards.
-    // The player's actual combo must exist in the range so their action can be resolved.
-    var opp = 1 - pid;
-    var oppCards = G.hole[opp] || [];
-    var excluded = [...oppCards, ...G.board];
+    // Only exclude board cards (public info). Opponent hole cards are hidden
+    // so excluding them would leak info and reduce count from 1326 to 1225.
+    var excluded = [...G.board];
     G.ranges[pid] = [];
     for (var r=0;r<13;r++) {
       G.ranges[pid][r]=[];
@@ -994,10 +991,12 @@ var RP = (function() {
         var map={};
         for (var combo of combos) {
           var c1=combo.slice(0,2), c2=combo.slice(2,4);
-          // Include this combo unless it uses an excluded card
-          if (!excluded.includes(c1)&&!excluded.includes(c2)) {
-            map[cKey(c1,c2)]=defAction;
-          }
+          if (excluded.includes(c1)||excluded.includes(c2)) continue;
+          var ck=cKey(c1,c2);
+          // If the player's range has been narrowed (they already acted this hand),
+          // only include combos still in their range. All others are grayed out.
+          if (G.narrowed[pid]!==null && !G.narrowed[pid].has(ck)) continue;
+          map[ck]=defAction;
         }
         G.ranges[pid][r][c]=map;
       }
@@ -1144,9 +1143,11 @@ var RP = (function() {
     for (var combo of combos) {
       var c1=combo.slice(0,2), c2=combo.slice(2,4);
       var ck=cKey(c1,c2);
+      // Skip combos not in this player's current range
+      if (!(ck in map)) continue;
       var label=cRank(c1)+SYM[cSuit(c1)]+cRank(c2)+SYM[cSuit(c2)];
       var btn=document.createElement('button');
-      btn.className='sopt'+(map[ck]?' used':'');
+      btn.className='sopt';
       btn.dataset.combo=combo;
       btn.style.color=(CLR[cSuit(c1)]==='red'||CLR[cSuit(c2)]==='red')?'#e74c3c':'#aaa';
       btn.textContent=label;
