@@ -854,6 +854,7 @@ var RP = (function() {
       streetActed:   [false,false],
       // misc
       draft: [null,null],
+      draftBetSz: [null,null],
       timerInt: null,
       timerLeft: cfg.timeLimit,
       handOver: false,
@@ -979,6 +980,8 @@ var RP = (function() {
     // Init range
     initRange(pid);
     G.draft[pid]=null;
+    G.draftBetSz[pid]=null;
+    $('bet-inp').value='';
 
     colorChart(pid, true);
     colorChart(1-pid, false);
@@ -1039,8 +1042,7 @@ var RP = (function() {
 
       if (isActive) {
         var map=G.ranges[pid][r][c];
-        // Only count non-_sz keys (bet size entries have keys ending in _sz)
-        var acts=Object.entries(map).filter(([k])=>!k.endsWith('_sz')).map(([,v])=>v);
+        var acts=Object.values(map);
         if (acts.length===0) { cell.classList.add('a-none'); return; }
         var cnt={};
         acts.forEach(a=>{cnt[a]=(cnt[a]||0)+1;});
@@ -1068,7 +1070,7 @@ var RP = (function() {
       var n=0;
       for(var r=0;r<13;r++) for(var c=0;c<13;c++) {
         var m=G.ranges[pid][r][c];
-        n+=Object.keys(m).filter(k=>!k.endsWith('_sz')).length;
+        n+=Object.keys(m).length;
       }
       el.textContent=n+' combos';
     } else {
@@ -1092,7 +1094,7 @@ var RP = (function() {
 
   // ---- Drag selection ----
   var selMode = 'rect'; // 'rect' | 'free'
-  var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set() };
+  var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set(), removing:false, gesture: new Set() };
 
   function setSelMode(mode) {
     selMode = mode;
@@ -1112,9 +1114,14 @@ var RP = (function() {
       var cell=e.target.closest('.hc');
       if (!cell) return;
       e.preventDefault();
+      var key=cell.dataset.r+','+cell.dataset.c;
+      drag.removing = drag.cells.has(key);
       drag.on=true; drag.pid=pid;
       drag.startR=+cell.dataset.r; drag.startC=+cell.dataset.c;
-      drag.cells=new Set([drag.startR+','+drag.startC]);
+      drag.prevCells=new Set(drag.cells); // snapshot before this drag
+      drag.gesture=new Set([key]);
+      // Apply first cell immediately
+      if (drag.removing) drag.cells.delete(key); else drag.cells.add(key);
       refreshDragHighlight();
     });
 
@@ -1123,13 +1130,19 @@ var RP = (function() {
       var cell=e.target.closest('.hc');
       if (!cell) return;
       if (selMode==='free') {
-        drag.cells.add(cell.dataset.r+','+cell.dataset.c);
+        var key=cell.dataset.r+','+cell.dataset.c;
+        drag.gesture.add(key);
+        if (drag.removing) drag.cells.delete(key); else drag.cells.add(key);
       } else {
         var cr=+cell.dataset.r, cc=+cell.dataset.c;
         var minR=Math.min(drag.startR,cr), maxR=Math.max(drag.startR,cr);
         var minC=Math.min(drag.startC,cc), maxC=Math.max(drag.startC,cc);
-        drag.cells=new Set();
-        for(var rr=minR;rr<=maxR;rr++) for(var cc2=minC;cc2<=maxC;cc2++) drag.cells.add(rr+','+cc2);
+        // Rebuild the rect relative to start, then apply to the accumulated set
+        drag.cells=new Set(drag.prevCells||[]);
+        for(var rr=minR;rr<=maxR;rr++) for(var cc2=minC;cc2<=maxC;cc2++) {
+          var k=rr+','+cc2;
+          if (drag.removing) drag.cells.delete(k); else drag.cells.add(k);
+        }
       }
       refreshDragHighlight();
     });
@@ -1151,8 +1164,8 @@ var RP = (function() {
     if (!drag.on) return;
     drag.on=false;
     // Single cell → suit popup
-    if (drag.cells.size===1) {
-      var [key]=[...drag.cells];
+    if (drag.gesture.size===1) {
+      var [key]=[...drag.gesture];
       var [r,c]=key.split(',').map(Number);
       showSuitPop(r,c,e.clientX,e.clientY);
     }
@@ -1231,10 +1244,10 @@ var RP = (function() {
       makeABtn('Check','check','aBtn-check');
     } else {
       makeABtn('Call '+fmt(toCall),'call','aBtn-call');
+      makeABtn('Fold','fold','aBtn-fold');
     }
     if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
     else makeABtn('Raise','raise','aBtn-raise');
-    makeABtn('Fold','fold','aBtn-fold');
 
     // Default mode
     actMode = facing?'call':'check';
@@ -1268,16 +1281,14 @@ var RP = (function() {
   }
 
   function updateBetUI(pid) {
-    var isBR=actMode==='bet'||actMode==='raise';
-    $('bet-row').style.display=isBR?'flex':'none';
-    $('presets').style.display=isBR?'flex':'none';
-    if (!isBR) return;
+    $('bet-row').style.display='flex';
+    $('presets').style.display='flex';
 
     var pot=G.pot+G.bets[0]+G.bets[1];
     var myStack=G.stacks[pid];
     var myBet=G.bets[pid];
     var minRaiseTotal = G.curBetTo + Math.max(G.lastRaiseAmt, G.curBetTo||1);
-    if (G.curBetTo===0) minRaiseTotal=1; // open bet min 1bb
+    if (G.curBetTo===0) minRaiseTotal=1;
 
     var ps=$('presets');
     ps.innerHTML='';
@@ -1299,8 +1310,11 @@ var RP = (function() {
       ps.appendChild(b);
     });
 
-    var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(1),1,minRaiseTotal):minRaiseTotal;
-    $('bet-inp').value=Math.min(defBet, myBet+myStack).toFixed(1);
+    // Only set default value when first opening the panel (input is empty)
+    if (!$('bet-inp').value) {
+      var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(1),1,minRaiseTotal):minRaiseTotal;
+      $('bet-inp').value=Math.min(defBet, myBet+myStack).toFixed(1);
+    }
   }
 
   function hideActionPanel() {
@@ -1321,18 +1335,13 @@ var RP = (function() {
         suitCombos.add(cKey(c1,c2));
       });
     }
-    var betSz = (action==='bet'||action==='raise') ? parseFloat($('bet-inp').value)||1 : null;
-
     drag.cells.forEach(function(key){
       var parts=key.split(',');
       var r=+parts[0], c=+parts[1];
       var map=G.ranges[pid2][r][c];
       for (var ck of Object.keys(map)) {
-        if (ck.endsWith('_sz')) continue;
         if (suitCombos===null||suitCombos.has(ck)) {
           map[ck]=action;
-          if (betSz!==null) map[ck+'_sz']=betSz;
-          else delete map[ck+'_sz'];
         }
       }
     });
@@ -1350,6 +1359,7 @@ var RP = (function() {
   function saveDraft() {
     var pid=G.actPid;
     G.draft[pid]=JSON.parse(JSON.stringify(G.ranges[pid]));
+    G.draftBetSz[pid]=parseFloat($('bet-inp').value)||null;
     setMsg('Draft saved!');
     setTimeout(function(){ setMsg(G.cfg.names[pid]+': assign hand ranges, then submit'); }, 1200);
   }
@@ -1357,6 +1367,9 @@ var RP = (function() {
   function submit(fromTimer) {
     var pid=G.actPid;
     stopTimer();
+    var betSz = fromTimer && G.draftBetSz[pid] != null
+      ? G.draftBetSz[pid]
+      : parseFloat($('bet-inp').value) || 1;
     if (fromTimer&&G.draft[pid]) G.ranges[pid]=G.draft[pid];
 
     $('wait'+pid).textContent='';
@@ -1370,14 +1383,13 @@ var RP = (function() {
     var map=G.ranges[pid][r][c];
     var ck=cKey(c1,c2);
     var action=map[ck]||(isFacing(pid)?'fold':'check');
-    var betSz=map[ck+'_sz']||parseFloat($('bet-inp').value)||1;
 
     // Build narrowed range: all combos that took same action
     var narrowedSet=new Set();
     for(var rr=0;rr<13;rr++) for(var cc=0;cc<13;cc++) {
       var m=G.ranges[pid][rr][cc];
       for(var k in m) {
-        if (!k.endsWith('_sz')&&m[k]===action) narrowedSet.add(k);
+        if (m[k]===action) narrowedSet.add(k);
       }
     }
     G.narrowed[pid]=narrowedSet;
