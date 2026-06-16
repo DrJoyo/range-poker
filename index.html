@@ -1657,8 +1657,8 @@ var RP = (function() {
       makeABtn('Call '+fmt(toCall),'call','aBtn-call');
       makeABtn('Fold','fold','aBtn-fold');
     }
-    var oppAllIn = G.stacks[1-pid] === 0;
-    if (!oppAllIn) {
+    var facingAllIn = G.stacks[1-pid] === 0 || (facing && toCall >= G.stacks[pid]);
+    if (!facingAllIn) {
       if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
       else makeABtn('Raise','raise','aBtn-raise');
     }
@@ -1680,14 +1680,16 @@ var RP = (function() {
   }
 
   function updateBetUI(pid) {
-    var oppAllIn = G.stacks[1-pid] === 0;
-    $('bet-row').style.display = oppAllIn ? 'none' : 'flex';
-    $('presets').style.display = oppAllIn ? 'none' : 'flex';
+    var opp = 1 - pid;
+    var myStack = G.stacks[pid];
+    var myBet = G.bets[pid];
+    var callAmt = Math.max(0, G.curBetTo - myBet);
+    var facingAllIn = G.stacks[opp] === 0 || (callAmt > 0 && callAmt >= myStack);
+    $('bet-row').style.display = facingAllIn ? 'none' : 'flex';
+    $('presets').style.display = facingAllIn ? 'none' : 'flex';
 
-    var callAmt = Math.max(0, G.curBetTo - G.bets[pid]);
+    var effectiveMax = Math.min(myBet + myStack, G.bets[opp] + G.stacks[opp]);
     var pot = G.pot + G.bets[0] + G.bets[1] + callAmt;
-    var myStack=G.stacks[pid];
-    var myBet=G.bets[pid];
     var minRaiseTotal = G.curBetTo===0 ? 1 : G.curBetTo + G.lastRaiseAmt;
 
     var ps=$('presets');
@@ -1698,10 +1700,10 @@ var RP = (function() {
       {l:'½P',  v:+(G.curBetTo+pot*0.5).toFixed(1)},
       {l:'¾P',  v:+(G.curBetTo+pot*0.75).toFixed(1)},
       {l:'Pot',  v:+(G.curBetTo+pot).toFixed(1)},
-      {l:'Allin',v:myBet+myStack},
+      {l:'Allin',v:effectiveMax},
     ];
     sizes.forEach(function(sz){
-      var capped=Math.min(sz.v, myBet+myStack);
+      var capped=Math.min(sz.v, effectiveMax);
       if (capped<=G.curBetTo&&sz.l!=='Allin'&&sz.l!=='Min') return;
       var b=document.createElement('button');
       b.className='preset';
@@ -1716,11 +1718,12 @@ var RP = (function() {
     });
 
     $('bet-inp').min = minRaiseTotal;
+    $('bet-inp').max = effectiveMax;
 
     // Only set default value when first opening the panel (input is empty)
     if (!$('bet-inp').value) {
       var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(1),1,minRaiseTotal):minRaiseTotal;
-      $('bet-inp').value=Math.min(defBet, myBet+myStack).toFixed(1);
+      $('bet-inp').value=Math.min(defBet, effectiveMax).toFixed(1);
     }
   }
 
@@ -1837,9 +1840,10 @@ var RP = (function() {
     if (action==='bet'||action==='raise') {
       var myBet=G.bets[pid];
       var myStack=G.stacks[pid];
+      var effectiveMax=Math.min(myBet+myStack, G.bets[1-pid]+G.stacks[1-pid]);
       var minTotal = G.curBetTo===0 ? Math.max(1, betSz) : G.curBetTo + G.lastRaiseAmt;
-      var totalBet=Math.min(betSz, myBet+myStack);
-      totalBet=Math.max(totalBet, Math.min(minTotal, myBet+myStack));
+      var totalBet=Math.min(betSz, effectiveMax);
+      totalBet=Math.max(totalBet, Math.min(minTotal, effectiveMax));
       var extra=totalBet-myBet;
       var paid=Math.min(extra, myStack);
       G.stacks[pid]-=paid;
@@ -2124,8 +2128,11 @@ document.addEventListener('DOMContentLoaded', function(){
   RP._buildRangeSlots();
   var betInp = document.getElementById('bet-inp');
   betInp.addEventListener('change', function() {
+    var val = parseFloat(this.value);
     var min = parseFloat(this.min);
-    if (min && parseFloat(this.value) < min) this.value = min.toFixed(1);
+    var max = parseFloat(this.max);
+    if (min && val < min) this.value = min.toFixed(1);
+    else if (max && val > max) this.value = max.toFixed(1);
   });
 });
 </script>
