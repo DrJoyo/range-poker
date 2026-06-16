@@ -334,6 +334,10 @@ body {
 .sel-mode-btn.active { background: #1a5276; color: #ccc; }
 #sel-all-btn { border-left: none; box-sizing: border-box; width: 60px; height: 43px; flex-shrink: 0; }
 
+#range-dist { font-size: 0.72em; color: #aaa; text-align: center; line-height: 1.4; }
+#range-dist-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; }
+#range-dist-bar span { display: block; transition: width 0.15s; }
+
 .bet-row {
   display: none;
   align-items: center;
@@ -544,6 +548,8 @@ body {
           <button class="sel-mode-btn" id="mode-free" onclick="RP.setSelMode('free')">✏ Freehand</button>
           <button class="sel-mode-btn" id="sel-all-btn" onclick="RP.toggleSelectAll()">+<br>Select All</button>
         </div>
+        <div id="range-dist"></div>
+        <div id="range-dist-bar"></div>
         <div class="action-btns" id="abtns"></div>
         <div class="bet-row" id="bet-row">
           <span>Size:</span>
@@ -1006,6 +1012,7 @@ var RP = (function() {
     colorChart(1-pid, false);
     updateRangeSum(pid);
     updateRangeSum(1-pid);
+    updateRangeDist(pid);
     renderChartListeners(pid);
 
     $('wait'+pid).textContent='';
@@ -1091,6 +1098,36 @@ var RP = (function() {
     } else {
       el.textContent='';
     }
+  }
+
+  function updateRangeDist(pid) {
+    var distEl=$('range-dist');
+    var barEl=$('range-dist-bar');
+    if (!distEl||!barEl) return;
+    var counts={};
+    var total=0;
+    for (var r=0;r<13;r++) for (var c=0;c<13;c++) {
+      var map=G.ranges[pid][r][c];
+      for (var ck in map) {
+        var a=map[ck];
+        counts[a]=(counts[a]||0)+1;
+        total++;
+      }
+    }
+    if (total===0) { distEl.textContent=''; barEl.innerHTML=''; return; }
+    var order=['fold','check','call','bet','raise'];
+    var colors={fold:'#1a5276',check:'#1e8449',call:'#1e8449',bet:'#922b21',raise:'#922b21'};
+    var parts=[];
+    order.forEach(function(a){
+      if (counts[a]) parts.push({a:a,n:counts[a]});
+    });
+    distEl.textContent=parts.map(function(p){
+      return p.a.charAt(0).toUpperCase()+p.a.slice(1)+' '+Math.round(p.n/total*100)+'%';
+    }).join(' · ');
+    barEl.innerHTML=parts.map(function(p){
+      var pct=(p.n/total*100).toFixed(2);
+      return '<span style="width:'+pct+'%;background:'+colors[p.a]+'"></span>';
+    }).join('');
   }
 
   // Build chart cells (once per hand)
@@ -1676,6 +1713,7 @@ var RP = (function() {
     refreshDragHighlight();
     colorChart(pid, true);
     updateRangeSum(pid);
+    updateRangeDist(pid);
   }
 
   // ---- Draft & Submit ----
