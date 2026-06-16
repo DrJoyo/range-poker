@@ -541,6 +541,7 @@ body {
         <div id="sel-mode-row">
           <button class="sel-mode-btn active" id="mode-rect" onclick="RP.setSelMode('rect')">▭ Rectangle</button>
           <button class="sel-mode-btn" id="mode-free" onclick="RP.setSelMode('free')">✏ Freehand</button>
+          <button class="sel-mode-btn" onclick="RP.deselectAll()" style="color:#c0392b;border-left:none;">✕ Deselect All</button>
         </div>
         <div class="action-btns" id="abtns"></div>
         <div class="bet-row" id="bet-row">
@@ -1118,6 +1119,11 @@ var RP = (function() {
   var selMode = 'rect'; // 'rect' | 'free'
   var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set(), removing:false, gesture: new Set() };
 
+  function deselectAll() {
+    drag.cells=new Set();
+    refreshDragHighlight();
+  }
+
   function setSelMode(mode) {
     selMode = mode;
     document.getElementById('mode-rect').classList.toggle('active', mode==='rect');
@@ -1334,7 +1340,7 @@ var RP = (function() {
       var win=[lo,lo+1,lo+2,lo+3,lo+4];
       if(win.filter(function(r){return s.has(r);}).length===4){
         var mi=win.findIndex(function(r){return !s.has(r);});
-        if(mi===0||mi===4) oesd=true; else gutshot=true;
+        if((mi===0&&lo+4<14)||(mi===4&&lo>1)) oesd=true; else gutshot=true;
       }
     }
     return {oesd:oesd,gutshot:gutshot};
@@ -1601,6 +1607,7 @@ var RP = (function() {
 
   function submit(fromTimer) {
     var pid=G.actPid;
+    deselectAll();
     stopTimer();
     var betSz = fromTimer && G.draftBetSz[pid] != null
       ? G.draftBetSz[pid]
@@ -1868,6 +1875,7 @@ var RP = (function() {
     toggleDebug: toggleDebug,
     toggleSF: toggleSF,
     toggleHT: toggleHT,
+    deselectAll: deselectAll,
     setSelMode: setSelMode,
     _initCharts: initCharts,
     _buildSuitFilter: buildSuitFilterUI
