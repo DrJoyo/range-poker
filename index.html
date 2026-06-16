@@ -212,6 +212,12 @@ body {
 #suit-filter { border-top: 1px solid #1a3a5a; margin-top: 3px; padding-top: 3px; }
 .sf-toggle { background:none; border:none; color:#7fb3d3; font-size:0.73em; cursor:pointer; width:100%; text-align:left; padding:2px 0; }
 .sf-toggle:hover { color:#bbb; }
+#hand-types { border-top: 1px solid #1a3a5a; margin-top: 3px; padding-top: 3px; }
+#ht-toggle-btn { background:none; border:none; color:#7fb3d3; font-size:0.73em; cursor:pointer; width:100%; text-align:left; padding:2px 0; }
+#ht-toggle-btn:hover { color:#bbb; }
+#ht-body { margin-top:4px; display:flex; flex-wrap:wrap; gap:3px; }
+.ht-btn { background:#0f2a3a; border:1px solid #1a4a6a; color:#9cc; font-size:0.63em; border-radius:3px; padding:2px 5px; cursor:pointer; white-space:nowrap; }
+.ht-btn:hover { background:#1a3a50; color:#eff; }
 #sf-body { margin-top:4px; display:flex; flex-direction:column; gap:5px; }
 .sf-section { display:flex; flex-direction:column; gap:2px; }
 .sf-sec-hdr { display:flex; align-items:center; justify-content:space-between; font-size:0.65em; color:#555; }
@@ -310,7 +316,6 @@ body {
   cursor: pointer;
 }
 .aBtn:hover { filter: brightness(1.15); }
-.aBtn.sel { outline: 2px solid #fff; outline-offset: 1px; }
 .aBtn-check, .aBtn-call { background: #1e8449; color: #fff; }
 .aBtn-bet, .aBtn-raise { background: #922b21; color: #fff; }
 .aBtn-fold { background: #1a5276; color: #fff; }
@@ -472,7 +477,7 @@ body {
     </div>
     <div class="setup-row">
       <label>Time per Turn (sec)</label>
-      <input type="number" id="cfg-time" value="20" min="5" max="120" step="5">
+      <input type="number" id="cfg-time" value="120" min="5" max="300" step="5">
     </div>
     <div class="setup-row">
       <label>Player 1 Name</label>
@@ -548,6 +553,10 @@ body {
           <button class="sf-toggle" id="sf-toggle-btn" onclick="RP.toggleSF()">▸ Suit Filter</button>
           <div id="sf-body" style="display:none"></div>
         </div>
+        <div id="hand-types">
+          <button id="ht-toggle-btn" onclick="RP.toggleHT()">▸ Hand Types</button>
+          <div id="ht-body" style="display:none"></div>
+        </div>
         <div class="submit-row">
           <button class="btn-draft" onclick="RP.saveDraft()">Save Draft</button>
           <button class="btn-submit" onclick="RP.submit()">Submit</button>
@@ -556,6 +565,7 @@ body {
 
       <div id="log"></div>
       <button id="next-btn" onclick="RP.nextHand()">Next Hand</button>
+      <button id="debug-btn" onclick="RP.toggleDebug()" style="background:#0f3460;border:1px solid #1a5276;color:#555;border-radius:5px;padding:4px 10px;font-size:0.72em;cursor:pointer;margin-top:2px;">🔍 Debug: Off</button>
     </div>
 
     <!-- P2 RIGHT -->
@@ -711,17 +721,21 @@ var RP = (function() {
 
   // ---- Hand Evaluator ----
   function evalHand(cards) {
-    // 5 or 7 cards → {rank: number, desc: string}
-    if (cards.length===7) {
-      var best=null;
-      for (var i=0;i<7;i++) for (var j=i+1;j<7;j++) {
-        var five=cards.filter((_,k)=>k!==i&&k!==j);
+    if (cards.length===5) return eval5(cards);
+    var best=null;
+    var n=cards.length; // 6 (turn) or 7 (river) — pick best 5
+    var skip = n===7 ? 2 : 1;
+    function iter(start, excluded) {
+      if (excluded.length===skip) {
+        var five=cards.filter((_,k)=>!excluded.includes(k));
         var v=eval5(five);
         if (!best||v.rank>best.rank) best=v;
+        return;
       }
-      return best;
+      for (var i=start;i<n;i++) { excluded.push(i); iter(i+1,excluded); excluded.pop(); }
     }
-    return eval5(cards);
+    iter(0,[]);
+    return best;
   }
 
   function eval5(cards) {
@@ -898,8 +912,8 @@ var RP = (function() {
     G.hole[0] = [G.deck.pop(), G.deck.pop()];
     G.hole[1] = [G.deck.pop(), G.deck.pop()];
     G.board = [];
-    renderHole(0, false);
-    renderHole(1, false);
+    renderHole(0, debugMode);
+    renderHole(1, debugMode);
     renderBoard();
     $('street-lbl').textContent='Preflop';
     $('log').innerHTML='';
@@ -1238,8 +1252,247 @@ var RP = (function() {
     if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
   }
 
+  // ---- Hand type category selection ----
+
+  function boardAnalysis(board) {
+    var rc={}, sc={s:0,h:0,d:0,c:0};
+    for(var card of board){ var rk=cRank(card), sk=cSuit(card); rc[rk]=(rc[rk]||0)+1; sc[sk]++; }
+    var ur=Object.keys(rc).sort(function(a,b){return RVAL[b]-RVAL[a];});
+    return {rankCounts:rc, suitCounts:sc, uniqueRanks:ur,
+            isPaired:Object.values(rc).some(function(c){return c>=2;}),
+            topRankVal:ur.length>0?RVAL[ur[0]]:0};
+  }
+
+  function hasStraightRanks(rvArr) {
+    var s=new Set(rvArr);
+    if(s.has(14)) s.add(1);
+    for(var lo=1;lo<=10;lo++)
+      if([lo,lo+1,lo+2,lo+3,lo+4].every(function(r){return s.has(r);})) return true;
+    return false;
+  }
+
+  function isStraightPossible(ba) {
+    var s=new Set(ba.uniqueRanks.map(function(r){return RVAL[r];}));
+    if(s.has(14)) s.add(1);
+    for(var lo=1;lo<=10;lo++)
+      if([lo,lo+1,lo+2,lo+3,lo+4].filter(function(r){return s.has(r);}).length>=3) return true;
+    return false;
+  }
+
+  function isDrawPossible(ba) {
+    var s=new Set(ba.uniqueRanks.map(function(r){return RVAL[r];}));
+    if(s.has(14)) s.add(1);
+    for(var lo=1;lo<=10;lo++)
+      if([lo,lo+1,lo+2,lo+3,lo+4].filter(function(r){return s.has(r);}).length>=2) return true;
+    return false;
+  }
+
+  function isFlushHand(c1,c2,ba) {
+    var sc=Object.assign({},ba.suitCounts);
+    sc[cSuit(c1)]++; sc[cSuit(c2)]++;
+    return Object.values(sc).some(function(c){return c>=5;});
+  }
+
+  function isStraightHand(c1,c2,board) {
+    return hasStraightRanks([c1,c2].concat(board).map(function(c){return RVAL[cRank(c)];}));
+  }
+
+  function isPairAtRank(c1,c2,rank,ba) {
+    if(!rank||ba.rankCounts[rank]!==1) return false;
+    var r1=cRank(c1),r2=cRank(c2);
+    if(r1===r2) return false;
+    if((r1===rank)===(r2===rank)) return false; // neither or both hit rank
+    var other=(r1===rank)?r2:r1;
+    return !ba.rankCounts[other];
+  }
+
+  function isOverpair(c1,c2,ba) {
+    var r1=cRank(c1),r2=cRank(c2);
+    if(r1!==r2||ba.rankCounts[r1]) return false;
+    return RVAL[r1]>ba.topRankVal;
+  }
+
+  function isUnderpair(c1,c2,ba) {
+    var r1=cRank(c1),r2=cRank(c2);
+    if(r1!==r2||ba.rankCounts[r1]) return false;
+    return RVAL[r1]<ba.topRankVal;
+  }
+
+  function isFlushDraw(c1,c2,ba) {
+    var sc=Object.assign({},ba.suitCounts);
+    sc[cSuit(c1)]++; sc[cSuit(c2)]++;
+    return Object.values(sc).some(function(c){return c===4;});
+  }
+
+  function getStraightDrawType(c1,c2,board) {
+    var allRV=[c1,c2].concat(board).map(function(c){return RVAL[cRank(c)];});
+    if(hasStraightRanks(allRV)) return null;
+    var s=new Set(allRV);
+    if(s.has(14)) s.add(1);
+    var oesd=false,gutshot=false;
+    for(var lo=1;lo<=10;lo++){
+      var win=[lo,lo+1,lo+2,lo+3,lo+4];
+      if(win.filter(function(r){return s.has(r);}).length===4){
+        var mi=win.findIndex(function(r){return !s.has(r);});
+        if(mi===0||mi===4) oesd=true; else gutshot=true;
+      }
+    }
+    return {oesd:oesd,gutshot:gutshot};
+  }
+
+  function isTwoPair(c1,c2,ba) {
+    if(ba.isPaired) return false;
+    var r1=cRank(c1),r2=cRank(c2);
+    if(r1===r2) return false;
+    return !!(ba.rankCounts[r1]&&ba.rankCounts[r2]);
+  }
+
+  function isSet(c1,c2,ba) {
+    if(ba.isPaired) return false;
+    var r1=cRank(c1),r2=cRank(c2);
+    if(r1!==r2) return false;
+    return !!ba.rankCounts[r1];
+  }
+
+  function handTier(c1,c2,board) {
+    var h=evalHand([c1,c2].concat(board)).rank;
+    if(h>=8e8) return 8;
+    if(h>=7e8) return 7; // quads
+    if(h>=6e8) return 6; // full house
+    if(h>=5e8) return 5; // flush
+    if(h>=4e8) return 4; // straight
+    if(h>=3e8) return 3; // trips
+    if(h>=2e8) return 2;
+    if(h>=1e8) return 1;
+    return 0;
+  }
+
+  function matchesCategory(c1,c2,catId,ba,board) {
+    switch(catId){
+      case 'flush':     return isFlushHand(c1,c2,ba);
+      case 'straight':  return isStraightHand(c1,c2,board);
+      case 'pair0':     return isPairAtRank(c1,c2,ba.uniqueRanks[0],ba);
+      case 'pair1':     return isPairAtRank(c1,c2,ba.uniqueRanks[1],ba);
+      case 'pair2':     return isPairAtRank(c1,c2,ba.uniqueRanks[2],ba);
+      case 'pair3':     return isPairAtRank(c1,c2,ba.uniqueRanks[3],ba);
+      case 'pair4':     return isPairAtRank(c1,c2,ba.uniqueRanks[4],ba);
+      case 'overpair':  return isOverpair(c1,c2,ba);
+      case 'underpair': return isUnderpair(c1,c2,ba);
+      case 'flushdraw': return isFlushDraw(c1,c2,ba);
+      case 'oesd':      { var dt=getStraightDrawType(c1,c2,board); return !!(dt&&dt.oesd); }
+      case 'gutshot':   { var dt2=getStraightDrawType(c1,c2,board); return !!(dt2&&dt2.gutshot); }
+      case 'twopair':   return isTwoPair(c1,c2,ba);
+      case 'set':       return isSet(c1,c2,ba);
+      case 'trips':     return handTier(c1,c2,board)===3;
+      case 'fullhouse': return handTier(c1,c2,board)===6;
+      case 'quads':     return handTier(c1,c2,board)===7;
+      default: return false;
+    }
+  }
+
+  function getHandCategories(pid, board) {
+    if(!board||board.length===0) return [];
+    var ba=boardAnalysis(board);
+    var isRiver=board.length===5;
+
+    var counts={flush:0,straight:0,p0:0,p1:0,p2:0,p3:0,p4:0,
+                overpair:0,underpair:0,flushdraw:0,oesd:0,gutshot:0,
+                twopair:0,set:0,trips:0,fullhouse:0,quads:0};
+
+    var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};})
+                        .filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
+    var checkFlush=Object.values(ba.suitCounts).some(function(c){return c>=3;});
+    var checkSt=isStraightPossible(ba);
+    var checkFD=!isRiver&&Object.values(ba.suitCounts).some(function(c){return c>=2;});
+    var checkDr=!isRiver&&isDrawPossible(ba);
+
+    for(var row=0;row<13;row++) for(var col=0;col<13;col++){
+      var map=G.ranges[pid][row][col];
+      var type=cellType(row,col);
+      for(var suit of typeSuits(type)){
+        var ck=htSuitKey(row,col,suit);
+        if(!(ck in map)) continue;
+        var c1=ck.slice(0,2),c2=ck.slice(2,4);
+        if(checkFlush&&isFlushHand(c1,c2,ba)) counts.flush++;
+        if(checkSt&&isStraightHand(c1,c2,board)) counts.straight++;
+        for(var pp of validPairIdxs) if(isPairAtRank(c1,c2,pp.r,ba)) counts['p'+pp.i]++;
+        if(ba.topRankVal<14&&isOverpair(c1,c2,ba)) counts.overpair++;
+        if(ba.uniqueRanks.length>0&&isUnderpair(c1,c2,ba)) counts.underpair++;
+        if(checkFD&&isFlushDraw(c1,c2,ba)) counts.flushdraw++;
+        if(checkDr){var dt=getStraightDrawType(c1,c2,board);if(dt){if(dt.oesd)counts.oesd++;if(dt.gutshot)counts.gutshot++;}}
+        if(!ba.isPaired){if(isTwoPair(c1,c2,ba))counts.twopair++;if(isSet(c1,c2,ba))counts.set++;}
+        if(ba.isPaired){var t=handTier(c1,c2,board);if(t===3)counts.trips++;else if(t===6)counts.fullhouse++;else if(t===7)counts.quads++;}
+      }
+    }
+
+    var cats=[];
+    var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
+    if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+    if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
+    validPairIdxs.forEach(function(pp){if(counts['p'+pp.i]>0)cats.push({id:'pair'+pp.i,label:pnames[pp.i],n:counts['p'+pp.i]});});
+    if(counts.overpair>0) cats.push({id:'overpair',label:'Overpair',n:counts.overpair});
+    if(counts.underpair>0) cats.push({id:'underpair',label:'Underpair',n:counts.underpair});
+    if(!isRiver&&counts.flushdraw>0) cats.push({id:'flushdraw',label:'Flush Draw',n:counts.flushdraw});
+    if(!isRiver&&counts.oesd>0) cats.push({id:'oesd',label:'OESD',n:counts.oesd});
+    if(!isRiver&&counts.gutshot>0) cats.push({id:'gutshot',label:'Gutshot',n:counts.gutshot});
+    if(!ba.isPaired&&counts.twopair>0) cats.push({id:'twopair',label:'Two Pair',n:counts.twopair});
+    if(!ba.isPaired&&counts.set>0) cats.push({id:'set',label:'Set',n:counts.set});
+    if(ba.isPaired&&counts.trips>0) cats.push({id:'trips',label:'Trips',n:counts.trips});
+    if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+    if(ba.isPaired&&counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
+    return cats;
+  }
+
+  function selectCategory(catId, ba, board) {
+    var pid=G.actPid;
+    for(var r=0;r<13;r++) for(var c=0;c<13;c++){
+      var map=G.ranges[pid][r][c];
+      var type=cellType(r,c);
+      var filter=suitFilter[type];
+      var anyMatch=false;
+      for(var suit of typeSuits(type)){
+        if(!filter.has(suit)) continue;
+        var ck=htSuitKey(r,c,suit);
+        if(!(ck in map)) continue;
+        if(matchesCategory(ck.slice(0,2),ck.slice(2,4),catId,ba,board)){anyMatch=true;break;}
+      }
+      if(anyMatch) drag.cells.add(r+','+c);
+    }
+    refreshDragHighlight();
+  }
+
+  function toggleHT() {
+    var body=$('ht-body');
+    var open=body.style.display!=='none';
+    body.style.display=open?'none':'flex';
+    $('ht-toggle-btn').textContent=(open?'▸':'▾')+' Hand Types';
+  }
+
+  function buildHandTypePanel() {
+    var body=$('ht-body');
+    if(!body||!G) return;
+    body.innerHTML='';
+    if(!G.board||G.board.length===0){
+      body.innerHTML='<span style="font-size:0.63em;color:#555">No categories preflop</span>';
+      return;
+    }
+    var board=G.board;
+    var ba=boardAnalysis(board);
+    var cats=getHandCategories(G.actPid,board);
+    if(cats.length===0){
+      body.innerHTML='<span style="font-size:0.63em;color:#555">None available</span>';
+      return;
+    }
+    cats.forEach(function(cat){
+      var btn=document.createElement('button');
+      btn.className='ht-btn';
+      btn.textContent=cat.label+' ('+cat.n+')';
+      btn.onclick=function(){ selectCategory(cat.id,ba,board); };
+      body.appendChild(btn);
+    });
+  }
+
   // ---- Action panel ----
-  var actMode = 'check';
 
   function showActionPanel(pid) {
     var ap=$('action-panel');
@@ -1259,11 +1512,9 @@ var RP = (function() {
     if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
     else makeABtn('Raise','raise','aBtn-raise');
 
-    // Default mode
-    actMode = facing?'call':'check';
-    highlightABtn(actMode);
     $('action-prompt').textContent=G.cfg.names[pid]+': select hands then assign action';
     updateBetUI(pid);
+    buildHandTypePanel();
   }
 
   function makeABtn(label, mode, cls) {
@@ -1272,19 +1523,9 @@ var RP = (function() {
     b.dataset.mode=mode;
     b.textContent=label;
     b.addEventListener('click', function(){
-      var prev=actMode;
-      actMode=mode;
-      highlightABtn(mode);
-      updateBetUI(G.actPid);
       if (drag.cells.size>0) assignSelection(G.actPid, mode);
     });
     $('abtns').appendChild(b);
-  }
-
-  function highlightABtn(mode) {
-    document.querySelectorAll('#abtns .aBtn').forEach(function(b){
-      b.classList.toggle('sel', b.dataset.mode===mode);
-    });
   }
 
   function updateBetUI(pid) {
@@ -1391,7 +1632,7 @@ var RP = (function() {
     colorChart(pid, false);
     updateRangeSum(pid);
 
-    addLog(G.cfg.names[pid]+' ('+G.street+'): '+ht+' → '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), true);
+    addLog(G.cfg.names[pid]+' ('+G.street+'): '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), true);
     setMsg(G.cfg.names[pid]+' → '+action+(action==='bet'||action==='raise'?' '+fmt(betSz):''));
 
     execAction(pid, action, betSz);
@@ -1567,6 +1808,23 @@ var RP = (function() {
     dealHand();
   }
 
+  // ---- Debug mode ----
+  var debugMode = false;
+  function toggleDebug() {
+    debugMode = !debugMode;
+    var btn = $('debug-btn');
+    if (debugMode) {
+      btn.textContent = '🔍 Debug: On';
+      btn.style.color = '#f0c040';
+      btn.style.borderColor = '#f0c040';
+    } else {
+      btn.textContent = '🔍 Debug: Off';
+      btn.style.color = '#555';
+      btn.style.borderColor = '#1a5276';
+    }
+    if (G && G.hole[0]) { renderHole(0, debugMode); renderHole(1, debugMode); }
+  }
+
   // ---- Timer ----
   function startTimer(pid, onDone) {
     stopTimer();
@@ -1607,7 +1865,9 @@ var RP = (function() {
     submit: function(){ submit(false); },
     nextHand: nextHand,
     closeShowdown: closeShowdown,
+    toggleDebug: toggleDebug,
     toggleSF: toggleSF,
+    toggleHT: toggleHT,
     setSelMode: setSelMode,
     _initCharts: initCharts,
     _buildSuitFilter: buildSuitFilterUI
