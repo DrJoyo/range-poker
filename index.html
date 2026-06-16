@@ -541,7 +541,7 @@ body {
         <div id="sel-mode-row">
           <button class="sel-mode-btn active" id="mode-rect" onclick="RP.setSelMode('rect')">▭ Rectangle</button>
           <button class="sel-mode-btn" id="mode-free" onclick="RP.setSelMode('free')">✏ Freehand</button>
-          <button class="sel-mode-btn" onclick="RP.deselectAll()" style="color:#c0392b;border-left:none;">✕ Deselect All</button>
+          <button class="sel-mode-btn" id="sel-all-btn" onclick="RP.toggleSelectAll()" style="border-left:none;">✕ Deselect All</button>
         </div>
         <div class="action-btns" id="abtns"></div>
         <div class="bet-row" id="bet-row">
@@ -991,6 +991,10 @@ var RP = (function() {
   // ---- Turn ----
   function startTurn(pid) {
     G.actPid=pid;
+    suitFilter.suited=new Set(SUITED_SUITS);
+    suitFilter.offsuit=new Set(OFFSUIT_SUITS);
+    suitFilter.pair=new Set(PAIR_SUITS);
+    refreshSuitFilterBtns();
     // Init range
     initRange(pid);
     G.draft[pid]=null;
@@ -1124,6 +1128,25 @@ var RP = (function() {
     refreshDragHighlight();
   }
 
+  function selectAll() {
+    var pid=G.actPid;
+    for(var r=0;r<13;r++) for(var c=0;c<13;c++){
+      var map=G.ranges[pid][r][c];
+      var type=cellType(r,c);
+      var filter=suitFilter[type];
+      for(var suit of typeSuits(type)){
+        if(!filter.has(suit)) continue;
+        var ck=htSuitKey(r,c,suit);
+        if(ck in map){ drag.cells.add(r+','+c); break; }
+      }
+    }
+    refreshDragHighlight();
+  }
+
+  function toggleSelectAll() {
+    if(drag.cells.size===0) selectAll(); else deselectAll();
+  }
+
   function setSelMode(mode) {
     selMode = mode;
     document.getElementById('mode-rect').classList.toggle('active', mode==='rect');
@@ -1186,6 +1209,11 @@ var RP = (function() {
       if (on) cell.classList.add('drag-sel');
       else cell.classList.remove('drag-sel');
     });
+    var btn=$('sel-all-btn');
+    if(btn){
+      if(drag.cells.size===0){ btn.textContent='+ Select All'; btn.style.color=''; }
+      else { btn.textContent='✕ Deselect All'; btn.style.color='#c0392b'; }
+    }
   }
 
   document.addEventListener('mouseup', function(e) {
@@ -1477,20 +1505,20 @@ var RP = (function() {
 
     var cats=[];
     var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
-    if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
     if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
+    if(ba.isPaired&&counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
+    if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+    if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
     if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
-    validPairIdxs.forEach(function(pp){if(counts['p'+pp.i]>0)cats.push({id:'pair'+pp.i,label:pnames[pp.i],n:counts['p'+pp.i]});});
+    if(ba.isPaired&&counts.trips>0) cats.push({id:'trips',label:'Trips',n:counts.trips});
+    if(!ba.isPaired&&counts.set>0) cats.push({id:'set',label:'Set',n:counts.set});
+    if(!ba.isPaired&&counts.twopair>0) cats.push({id:'twopair',label:'Two Pair',n:counts.twopair});
     if(counts.overpair>0) cats.push({id:'overpair',label:'Overpair',n:counts.overpair});
+    validPairIdxs.forEach(function(pp){if(counts['p'+pp.i]>0)cats.push({id:'pair'+pp.i,label:pnames[pp.i],n:counts['p'+pp.i]});});
     if(counts.underpair>0) cats.push({id:'underpair',label:'Underpair',n:counts.underpair});
     if(!isRiver&&counts.flushdraw>0) cats.push({id:'flushdraw',label:'Flush Draw',n:counts.flushdraw});
     if(!isRiver&&counts.oesd>0) cats.push({id:'oesd',label:'OESD',n:counts.oesd});
     if(!isRiver&&counts.gutshot>0) cats.push({id:'gutshot',label:'Gutshot',n:counts.gutshot});
-    if(!ba.isPaired&&counts.twopair>0) cats.push({id:'twopair',label:'Two Pair',n:counts.twopair});
-    if(!ba.isPaired&&counts.set>0) cats.push({id:'set',label:'Set',n:counts.set});
-    if(ba.isPaired&&counts.trips>0) cats.push({id:'trips',label:'Trips',n:counts.trips});
-    if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
-    if(ba.isPaired&&counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
     return cats;
   }
 
@@ -1929,6 +1957,7 @@ var RP = (function() {
     toggleSF: toggleSF,
     toggleHT: toggleHT,
     deselectAll: deselectAll,
+    toggleSelectAll: toggleSelectAll,
     setSelMode: setSelMode,
     _initCharts: initCharts,
     _buildSuitFilter: buildSuitFilterUI
