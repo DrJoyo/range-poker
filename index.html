@@ -1258,6 +1258,48 @@ var RP = (function() {
     if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
   }
 
+  function refreshSuitFilterBtns() {
+    for(var type of ['suited','offsuit','pair']){
+      for(var suit of typeSuits(type)){
+        var btn=$('sf-'+type+'-'+suit);
+        if(btn) btn.classList.toggle('off',!suitFilter[type].has(suit));
+      }
+    }
+  }
+
+  // Returns {suited,offsuit,pair} Sets of suit combos that produce the given flush category,
+  // or null if the category doesn't need a suit-filter override.
+  function autoSuitFilter(catId, ba) {
+    var sc=ba.suitCounts;
+    if(catId==='flush'||catId==='straightflush'){
+      var suited=new Set(), offsuit=new Set(), pair=new Set();
+      for(var s of SUITED_SUITS){
+        if((sc[s[0]]||0)+2>=5) suited.add(s);
+      }
+      for(var s of OFFSUIT_SUITS){
+        if((sc[s[0]]||0)+1>=5||(sc[s[1]]||0)+1>=5) offsuit.add(s);
+      }
+      for(var s of PAIR_SUITS){
+        if((sc[s[0]]||0)+1>=5||(sc[s[1]]||0)+1>=5) pair.add(s);
+      }
+      return {suited:suited,offsuit:offsuit,pair:pair};
+    }
+    if(catId==='flushdraw'){
+      var suited=new Set(), offsuit=new Set(), pair=new Set();
+      for(var s of SUITED_SUITS){
+        if((sc[s[0]]||0)+2===4) suited.add(s);
+      }
+      for(var s of OFFSUIT_SUITS){
+        if((sc[s[0]]||0)+1===4||(sc[s[1]]||0)+1===4) offsuit.add(s);
+      }
+      for(var s of PAIR_SUITS){
+        if((sc[s[0]]||0)+1===4||(sc[s[1]]||0)+1===4) pair.add(s);
+      }
+      return {suited:suited,offsuit:offsuit,pair:pair};
+    }
+    return null;
+  }
+
   // ---- Hand type category selection ----
 
   function boardAnalysis(board) {
@@ -1375,8 +1417,9 @@ var RP = (function() {
 
   function matchesCategory(c1,c2,catId,ba,board) {
     switch(catId){
-      case 'flush':     return isFlushHand(c1,c2,ba);
-      case 'straight':  return isStraightHand(c1,c2,board);
+      case 'flush':        return isFlushHand(c1,c2,ba);
+      case 'straightflush':return handTier(c1,c2,board)===8;
+      case 'straight':     return isStraightHand(c1,c2,board);
       case 'pair0':     return isPairAtRank(c1,c2,ba.uniqueRanks[0],ba);
       case 'pair1':     return isPairAtRank(c1,c2,ba.uniqueRanks[1],ba);
       case 'pair2':     return isPairAtRank(c1,c2,ba.uniqueRanks[2],ba);
@@ -1401,7 +1444,7 @@ var RP = (function() {
     var ba=boardAnalysis(board);
     var isRiver=board.length===5;
 
-    var counts={flush:0,straight:0,p0:0,p1:0,p2:0,p3:0,p4:0,
+    var counts={flush:0,straightflush:0,straight:0,p0:0,p1:0,p2:0,p3:0,p4:0,
                 overpair:0,underpair:0,flushdraw:0,oesd:0,gutshot:0,
                 twopair:0,set:0,trips:0,fullhouse:0,quads:0};
 
@@ -1420,6 +1463,7 @@ var RP = (function() {
         if(!(ck in map)) continue;
         var c1=ck.slice(0,2),c2=ck.slice(2,4);
         if(checkFlush&&isFlushHand(c1,c2,ba)) counts.flush++;
+        if(checkFlush&&checkSt&&handTier(c1,c2,board)===8) counts.straightflush++;
         if(checkSt&&isStraightHand(c1,c2,board)) counts.straight++;
         for(var pp of validPairIdxs) if(isPairAtRank(c1,c2,pp.r,ba)) counts['p'+pp.i]++;
         if(ba.topRankVal<14&&isOverpair(c1,c2,ba)) counts.overpair++;
@@ -1434,6 +1478,7 @@ var RP = (function() {
     var cats=[];
     var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
     if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+    if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
     if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
     validPairIdxs.forEach(function(pp){if(counts['p'+pp.i]>0)cats.push({id:'pair'+pp.i,label:pnames[pp.i],n:counts['p'+pp.i]});});
     if(counts.overpair>0) cats.push({id:'overpair',label:'Overpair',n:counts.overpair});
@@ -1451,6 +1496,14 @@ var RP = (function() {
 
   function selectCategory(catId, ba, board) {
     var pid=G.actPid;
+    var asf=autoSuitFilter(catId,ba);
+    if(asf){
+      suitFilter.suited=asf.suited;
+      suitFilter.offsuit=asf.offsuit;
+      suitFilter.pair=asf.pair;
+      refreshSuitFilterBtns();
+      colorChart(pid,true);
+    }
     for(var r=0;r<13;r++) for(var c=0;c<13;c++){
       var map=G.ranges[pid][r][c];
       var type=cellType(r,c);
