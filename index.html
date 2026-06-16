@@ -889,6 +889,9 @@ var RP = (function() {
     updateUI();
     // Post blinds then start
     postBlinds();
+    // Initialize both ranges now so the waiting player shows 1326 combos immediately
+    G.narrowed=[null,null];
+    initRange(0); initRange(1);
     startStreet('preflop');
   }
 
