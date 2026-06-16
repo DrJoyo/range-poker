@@ -131,9 +131,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.88em;
-  font-weight: 600;
-  color: #ccc;
+  font-size: 1.15em;
+  font-weight: 700;
+  color: #ddd;
 }
 .dealer-btn {
   background: #f0c040;
@@ -259,7 +259,11 @@ body {
 .card.red { color: #c0392b; }
 .card.black { color: #111; }
 
-.bet-disp { font-size: 0.8em; color: #f0c040; text-align: center; min-height: 14px; }
+.bet-disp { font-size: 1.1em; font-weight: 700; color: #f0c040; position: absolute; top: 50%; transform: translateY(-50%); white-space: nowrap; }
+#bdisp0 { left: calc(100% + 8px); }
+#bdisp1 { right: calc(100% + 8px); }
+.stack-disp { font-size: 1.05em; font-weight: 600; color: #f0c040; text-align: center; min-height: 14px; }
+.hole-area { position: relative; display: inline-block; }
 .waiting { font-size: 0.72em; color: #444; font-style: italic; text-align: center; min-height: 14px; }
 
 /* Center column */
@@ -268,9 +272,20 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  padding-top: 46px;
+  position: relative;
+}
+#board-section {
+  position: absolute;
+  top: 554px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
 }
 #pot-disp {
-  font-size: 1em;
+  font-size: 1.3em;
   font-weight: 700;
   color: #f0c040;
 }
@@ -285,7 +300,6 @@ body {
   display: flex; align-items: center; justify-content: center;
 }
 .cc-slot .card { width: 36px; height: 52px; font-size: 0.95em; border: none; box-shadow: none; }
-#street-lbl { font-size: 0.8em; color: #7fb3d3; font-style: italic; }
 
 /* Action panel */
 #action-panel {
@@ -511,11 +525,6 @@ body {
 <!-- GAME SCREEN -->
 <div id="game-screen">
   <div id="top-bar">
-    <div>
-      <span id="tb-p1">Player 1: <span class="stack-info" id="tb-s1">100bb</span></span>
-      &nbsp;&nbsp;
-      <span id="tb-p2">Player 2: <span class="stack-info" id="tb-s2">100bb</span></span>
-    </div>
     <span id="tb-hand" style="color:#555;">Hand #1</span>
     <button class="btn-small" onclick="RP.openSettings()">⚙ Settings</button>
   </div>
@@ -539,24 +548,17 @@ body {
       </div>
       <div class="hand-chart" id="chart0"></div>
       <div class="range-sum" id="rsum0"></div>
-      <div class="hole-cards" id="hc0"></div>
-      <div class="bet-disp" id="bdisp0"></div>
+      <div class="hole-area">
+        <div class="hole-cards" id="hc0"></div>
+        <div class="bet-disp" id="bdisp0"></div>
+      </div>
+      <div class="stack-disp" id="sdisp0"></div>
       <div class="waiting" id="wait0"></div>
     </div>
 
     <!-- CENTER (col 3) -->
     <div id="center-col">
-      <div id="pot-disp">Pot: 0bb</div>
-      <div id="community-cards">
-        <div class="cc-slot" id="cc0"></div>
-        <div class="cc-slot" id="cc1"></div>
-        <div class="cc-slot" id="cc2"></div>
-        <div class="cc-slot" id="cc3"></div>
-        <div class="cc-slot" id="cc4"></div>
-      </div>
-      <div id="street-lbl">Preflop</div>
-
-      <div id="action-panel" class="hidden">
+      <div id="action-panel">
         <div id="action-prompt">Select hands then click action</div>
         <div id="sel-mode-row">
           <button class="sel-mode-btn active" id="mode-rect" onclick="RP.setSelMode('rect')">▭ Rectangle</button>
@@ -589,6 +591,17 @@ body {
       <div id="log"></div>
       <button id="next-btn" onclick="RP.nextHand()">Next Hand</button>
       <button id="debug-btn" onclick="RP.toggleDebug()" style="background:#0f3460;border:1px solid #1a5276;color:#555;border-radius:5px;padding:4px 10px;font-size:0.72em;cursor:pointer;margin-top:2px;">🔍 Debug: Off</button>
+
+      <div id="board-section">
+        <div id="community-cards">
+          <div class="cc-slot" id="cc0"></div>
+          <div class="cc-slot" id="cc1"></div>
+          <div class="cc-slot" id="cc2"></div>
+          <div class="cc-slot" id="cc3"></div>
+          <div class="cc-slot" id="cc4"></div>
+        </div>
+        <div id="pot-disp">Pot: 0bb</div>
+      </div>
     </div>
 
     <!-- P2 panel (col 4) -->
@@ -604,8 +617,11 @@ body {
       </div>
       <div class="hand-chart" id="chart1"></div>
       <div class="range-sum" id="rsum1"></div>
-      <div class="hole-cards" id="hc1"></div>
-      <div class="bet-disp" id="bdisp1"></div>
+      <div class="hole-area">
+        <div class="bet-disp" id="bdisp1"></div>
+        <div class="hole-cards" id="hc1"></div>
+      </div>
+      <div class="stack-disp" id="sdisp1"></div>
       <div class="waiting" id="wait1"></div>
     </div>
 
@@ -916,8 +932,6 @@ var RP = (function() {
   function updateUI() {
     if (!G) return;
     // Stacks
-    $('tb-p1').innerHTML=G.cfg.names[0]+': <span class="stack-info">'+fmt(G.stacks[0])+'</span>';
-    $('tb-p2').innerHTML=G.cfg.names[1]+': <span class="stack-info">'+fmt(G.stacks[1])+'</span>';
     $('tb-hand').textContent='Hand #'+G.handNum;
     // Names & positions
     for (var p=0;p<2;p++) {
@@ -926,10 +940,12 @@ var RP = (function() {
       $('pos'+p).textContent=G.dealer===p?'BTN/SB':'BB';
     }
     // Pot
-    $('pot-disp').textContent='Pot: '+fmt(G.pot+G.bets[0]+G.bets[1]);
-    // Bets
+    $('pot-disp').textContent='Pot: '+fmt(G.pot);
+    // Bets & stacks
     $('bdisp0').textContent=G.bets[0]>0?fmt(G.bets[0]):'';
     $('bdisp1').textContent=G.bets[1]>0?fmt(G.bets[1]):'';
+    $('sdisp0').textContent=fmt(G.stacks[0]);
+    $('sdisp1').textContent=fmt(G.stacks[1]);
   }
 
   // ---- Deal ----
@@ -941,7 +957,6 @@ var RP = (function() {
     renderHole(0, debugMode);
     renderHole(1, debugMode);
     renderBoard();
-    $('street-lbl').textContent='Preflop';
     $('log').innerHTML='';
     updateUI();
     // Post blinds then start
@@ -986,7 +1001,6 @@ var RP = (function() {
     G.street=street;
     G.streetChecked=[false,false];
     G.streetActed=[false,false];
-    $('street-lbl').textContent=street.charAt(0).toUpperCase()+street.slice(1);
 
     // Who acts first
     var first = street==='preflop' ? G.dealer : (1-G.dealer); // SB first preflop, BB first postflop
@@ -1773,7 +1787,7 @@ var RP = (function() {
 
     $('wait'+pid).textContent='';
     $('wait'+(1-pid)).textContent='';
-    hideActionPanel();
+    drag.cells=new Set();
 
     // Find action for actual hole cards
     var [c1,c2]=G.hole[pid];
@@ -1890,7 +1904,6 @@ var RP = (function() {
     if(G.board.length<4) G.board.push(G.deck.pop());
     if(G.board.length<5) G.board.push(G.deck.pop());
     renderBoard();
-    $('street-lbl').textContent='All In';
     renderHole(0,true); renderHole(1,true);
     setTimeout(function(){ showdown(); }, 800);
   }
