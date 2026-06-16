@@ -332,6 +332,7 @@ body {
 .sel-mode-btn:first-child { border-radius: 4px 0 0 4px; border-right: none; }
 .sel-mode-btn:last-child  { border-radius: 0 4px 4px 0; }
 .sel-mode-btn.active { background: #1a5276; color: #ccc; }
+#sel-all-btn { border-left: none; box-sizing: border-box; width: 60px; height: 43px; flex-shrink: 0; }
 
 .bet-row {
   display: none;
@@ -541,7 +542,7 @@ body {
         <div id="sel-mode-row">
           <button class="sel-mode-btn active" id="mode-rect" onclick="RP.setSelMode('rect')">▭ Rectangle</button>
           <button class="sel-mode-btn" id="mode-free" onclick="RP.setSelMode('free')">✏ Freehand</button>
-          <button class="sel-mode-btn" id="sel-all-btn" onclick="RP.toggleSelectAll()" style="border-left:none;">✕ Deselect All</button>
+          <button class="sel-mode-btn" id="sel-all-btn" onclick="RP.toggleSelectAll()">+<br>Select All</button>
         </div>
         <div class="action-btns" id="abtns"></div>
         <div class="bet-row" id="bet-row">
@@ -1211,8 +1212,8 @@ var RP = (function() {
     });
     var btn=$('sel-all-btn');
     if(btn){
-      if(drag.cells.size===0){ btn.textContent='+ Select All'; btn.style.color=''; }
-      else { btn.textContent='✕ Deselect All'; btn.style.color='#c0392b'; }
+      if(drag.cells.size===0){ btn.innerHTML='+<br>Select All'; btn.style.color=''; }
+      else { btn.innerHTML='✕<br>Deselect All'; btn.style.color='#c0392b'; }
     }
   }
 
