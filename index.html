@@ -115,7 +115,7 @@ body {
 /* Main 3-column layout */
 #main-area {
   display: grid;
-  grid-template-columns: 1fr 200px 1fr;
+  grid-template-columns: auto 1fr 200px 1fr auto;
   gap: 8px;
   align-items: start;
 }
@@ -338,6 +338,17 @@ body {
 #range-dist-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; }
 #range-dist-bar span { display: block; transition: width 0.15s; }
 
+.range-slots { display: flex; flex-direction: column; gap: 3px; width: 68px; flex-shrink: 0; padding-top: 2px; }
+.rs-hdr { font-size: 0.6em; color: #445; text-align: center; line-height: 1.3; margin-bottom: 1px; letter-spacing: 0.02em; }
+.rs-slot { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 3px 3px 4px; background: #0d1520; border: 1px solid #1a3a5a; border-radius: 4px; }
+.rs-name { font-size: 0.62em; color: #7a8a9a; text-align: center; cursor: text; outline: none; padding: 1px 2px; border-radius: 2px; word-break: break-word; min-height: 1.1em; }
+.rs-name:focus { background: #162540; color: #ddd; }
+.rs-btn { font-size: 0.62em; padding: 2px 0; border: none; border-radius: 3px; cursor: pointer; color: #ccc; background: #1a3a5a; width: 100%; }
+.rs-btn:hover { filter: brightness(1.3); }
+.rs-btn.rs-save { background: #145a32; }
+.rs-btn.rs-load.has-data { background: #7d3c98; }
+.range-slots.pf-disabled { opacity: 0.3; pointer-events: none; }
+
 .bet-row {
   display: none;
   align-items: center;
@@ -511,7 +522,10 @@ body {
   <div id="msg-banner">Welcome</div>
 
   <div id="main-area">
-    <!-- P1 LEFT -->
+    <!-- P1 range slots (col 1) -->
+    <div class="range-slots pf-disabled" id="rs0"></div>
+
+    <!-- P1 panel (col 2) -->
     <div class="player-panel" id="pp0">
       <div class="player-label">
         <span id="pname0">Player 1</span>
@@ -529,7 +543,7 @@ body {
       <div class="waiting" id="wait0"></div>
     </div>
 
-    <!-- CENTER -->
+    <!-- CENTER (col 3) -->
     <div id="center-col">
       <div id="pot-disp">Pot: 0bb</div>
       <div id="community-cards">
@@ -576,7 +590,7 @@ body {
       <button id="debug-btn" onclick="RP.toggleDebug()" style="background:#0f3460;border:1px solid #1a5276;color:#555;border-radius:5px;padding:4px 10px;font-size:0.72em;cursor:pointer;margin-top:2px;">🔍 Debug: Off</button>
     </div>
 
-    <!-- P2 RIGHT -->
+    <!-- P2 panel (col 4) -->
     <div class="player-panel" id="pp1">
       <div class="player-label">
         <span id="pname1">Player 2</span>
@@ -593,6 +607,9 @@ body {
       <div class="bet-disp" id="bdisp1"></div>
       <div class="waiting" id="wait1"></div>
     </div>
+
+    <!-- P2 range slots (col 5) -->
+    <div class="range-slots pf-disabled" id="rs1"></div>
   </div>
 </div>
 
@@ -1013,6 +1030,7 @@ var RP = (function() {
     updateRangeSum(pid);
     updateRangeSum(1-pid);
     updateRangeDist(pid);
+    updateSlotsDisabled();
     renderChartListeners(pid);
 
     $('wait'+pid).textContent='';
@@ -1160,6 +1178,10 @@ var RP = (function() {
   // ---- Drag selection ----
   var selMode = 'rect'; // 'rect' | 'free'
   var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set(), removing:false, gesture: new Set() };
+  var preflopSlots = [
+    [null,null,null,null,null],
+    [null,null,null,null,null]
+  ];
 
   function deselectAll() {
     drag.cells=new Set();
@@ -1683,6 +1705,8 @@ var RP = (function() {
       ps.appendChild(b);
     });
 
+    $('bet-inp').min = minRaiseTotal;
+
     // Only set default value when first opening the panel (input is empty)
     if (!$('bet-inp').value) {
       var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(1),1,minRaiseTotal):minRaiseTotal;
@@ -1985,6 +2009,84 @@ var RP = (function() {
   }
 
   // ---- Public API ----
+  // ---- Preflop range slots ----
+  function buildRangeSlots() {
+    for (var pid = 0; pid < 2; pid++) {
+      var el = $('rs'+pid);
+      if (!el) continue;
+      var html = '<div class="rs-hdr">Preflop<br>Ranges</div>';
+      for (var i = 0; i < 5; i++) {
+        html += '<div class="rs-slot">' +
+          '<div class="rs-name" id="rsn-'+pid+'-'+i+'" contenteditable="true" spellcheck="false">Slot '+(i+1)+'</div>' +
+          '<button class="rs-btn rs-save" onclick="RP.saveRange('+pid+','+i+')">Save</button>' +
+          '<button class="rs-btn rs-load" onclick="RP.loadRange('+pid+','+i+')">Load</button>' +
+          '</div>';
+      }
+      el.innerHTML = html;
+    }
+  }
+
+  function updateSlotsDisabled() {
+    var isPreflop = G && G.street === 'preflop';
+    for (var pid = 0; pid < 2; pid++) {
+      var el = $('rs'+pid);
+      if (el) el.classList.toggle('pf-disabled', !isPreflop || G.actPid !== pid);
+    }
+  }
+
+  function saveRange(pid, i) {
+    if (!G || G.street !== 'preflop') return;
+    preflopSlots[pid][i] = {
+      ranges: JSON.parse(JSON.stringify(G.ranges[pid])),
+      betSz: parseFloat($('bet-inp').value) || null
+    };
+    var loadBtn = document.querySelector('#rs'+pid+' .rs-slot:nth-child('+(i+2)+') .rs-load');
+    if (loadBtn) loadBtn.classList.add('has-data');
+    setMsg('Range saved to slot '+(i+1)+'.');
+  }
+
+  function remapAction(action, facing) {
+    if (facing) {
+      if (action === 'check') return 'fold';
+      if (action === 'bet') return 'raise';
+      return action;
+    } else {
+      if (action === 'fold' || action === 'call') return 'check';
+      if (action === 'raise') return 'bet';
+      return action;
+    }
+  }
+
+  function loadRange(pid, i) {
+    if (!G || G.street !== 'preflop') return;
+    var slot = preflopSlots[pid][i];
+    if (!slot) { setMsg('Slot '+(i+1)+' is empty.'); return; }
+    var facing = isFacing(pid);
+    var defAction = facing ? 'fold' : 'check';
+    var savedRanges = slot.ranges;
+    for (var r = 0; r < 13; r++) {
+      for (var c = 0; c < 13; c++) {
+        var curMap = G.ranges[pid][r][c];
+        var savedMap = savedRanges[r] && savedRanges[r][c];
+        for (var ck in curMap) {
+          if (savedMap && (ck in savedMap)) {
+            curMap[ck] = remapAction(savedMap[ck], facing);
+          } else {
+            curMap[ck] = defAction;
+          }
+        }
+      }
+    }
+    if (slot.betSz) {
+      var minRaiseTotal = G.curBetTo === 0 ? 1 : G.curBetTo + Math.max(G.lastRaiseAmt, G.curBetTo || 1);
+      $('bet-inp').value = Math.max(slot.betSz, minRaiseTotal).toFixed(1);
+    }
+    colorChart(pid, true);
+    updateRangeSum(pid);
+    updateRangeDist(pid);
+    setMsg('Slot '+(i+1)+' loaded.');
+  }
+
   return {
     startGame: startGame,
     openSettings: openSettings,
@@ -1999,7 +2101,10 @@ var RP = (function() {
     toggleSelectAll: toggleSelectAll,
     setSelMode: setSelMode,
     _initCharts: initCharts,
-    _buildSuitFilter: buildSuitFilterUI
+    _buildSuitFilter: buildSuitFilterUI,
+    _buildRangeSlots: buildRangeSlots,
+    saveRange: saveRange,
+    loadRange: loadRange
   };
 })();
 
@@ -2007,6 +2112,12 @@ var RP = (function() {
 document.addEventListener('DOMContentLoaded', function(){
   RP._initCharts();
   RP._buildSuitFilter();
+  RP._buildRangeSlots();
+  var betInp = document.getElementById('bet-inp');
+  betInp.addEventListener('change', function() {
+    var min = parseFloat(this.min);
+    if (min && parseFloat(this.value) < min) this.value = min.toFixed(1);
+  });
 });
 </script>
 </body>
