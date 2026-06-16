@@ -383,6 +383,7 @@ body {
   cursor: pointer;
 }
 .preset:hover { background: #1a5276; }
+.preset:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
 .submit-row {
   display: flex;
@@ -1656,8 +1657,11 @@ var RP = (function() {
       makeABtn('Call '+fmt(toCall),'call','aBtn-call');
       makeABtn('Fold','fold','aBtn-fold');
     }
-    if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
-    else makeABtn('Raise','raise','aBtn-raise');
+    var oppAllIn = G.stacks[1-pid] === 0;
+    if (!oppAllIn) {
+      if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
+      else makeABtn('Raise','raise','aBtn-raise');
+    }
 
     $('action-prompt').textContent=G.cfg.names[pid]+': select hands then assign action';
     updateBetUI(pid);
@@ -1676,14 +1680,15 @@ var RP = (function() {
   }
 
   function updateBetUI(pid) {
-    $('bet-row').style.display='flex';
-    $('presets').style.display='flex';
+    var oppAllIn = G.stacks[1-pid] === 0;
+    $('bet-row').style.display = oppAllIn ? 'none' : 'flex';
+    $('presets').style.display = oppAllIn ? 'none' : 'flex';
 
-    var pot=G.pot+G.bets[0]+G.bets[1];
+    var callAmt = Math.max(0, G.curBetTo - G.bets[pid]);
+    var pot = G.pot + G.bets[0] + G.bets[1] + callAmt;
     var myStack=G.stacks[pid];
     var myBet=G.bets[pid];
-    var minRaiseTotal = G.curBetTo + Math.max(G.lastRaiseAmt, G.curBetTo||1);
-    if (G.curBetTo===0) minRaiseTotal=1;
+    var minRaiseTotal = G.curBetTo===0 ? 1 : G.curBetTo + G.lastRaiseAmt;
 
     var ps=$('presets');
     ps.innerHTML='';
@@ -1701,7 +1706,12 @@ var RP = (function() {
       var b=document.createElement('button');
       b.className='preset';
       b.textContent=sz.l;
-      b.addEventListener('click',function(){ $('bet-inp').value=capped.toFixed(1); });
+      var illegal = sz.l!=='Allin' && sz.l!=='Min' && sz.v < minRaiseTotal;
+      if (illegal) {
+        b.disabled=true;
+      } else {
+        b.addEventListener('click',function(){ $('bet-inp').value=capped.toFixed(1); });
+      }
       ps.appendChild(b);
     });
 
@@ -1827,8 +1837,7 @@ var RP = (function() {
     if (action==='bet'||action==='raise') {
       var myBet=G.bets[pid];
       var myStack=G.stacks[pid];
-      var minTotal=G.curBetTo+Math.max(G.lastRaiseAmt, G.curBetTo||1);
-      if (G.curBetTo===0) minTotal=Math.max(1, betSz);
+      var minTotal = G.curBetTo===0 ? Math.max(1, betSz) : G.curBetTo + G.lastRaiseAmt;
       var totalBet=Math.min(betSz, myBet+myStack);
       totalBet=Math.max(totalBet, Math.min(minTotal, myBet+myStack));
       var extra=totalBet-myBet;
@@ -2078,7 +2087,7 @@ var RP = (function() {
       }
     }
     if (slot.betSz) {
-      var minRaiseTotal = G.curBetTo === 0 ? 1 : G.curBetTo + Math.max(G.lastRaiseAmt, G.curBetTo || 1);
+      var minRaiseTotal = G.curBetTo === 0 ? 1 : G.curBetTo + G.lastRaiseAmt;
       $('bet-inp').value = Math.max(slot.betSz, minRaiseTotal).toFixed(1);
     }
     colorChart(pid, true);
