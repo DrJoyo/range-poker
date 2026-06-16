@@ -171,8 +171,8 @@ body {
 /* Hand chart */
 .hand-chart {
   display: grid;
-  grid-template-columns: repeat(13, 28px);
-  grid-template-rows: repeat(13, 22px);
+  grid-template-columns: repeat(13, 30px);
+  grid-template-rows: repeat(13, 42px);
   gap: 1px;
   background: #0a0a15;
   border: 1px solid #0f3460;
@@ -182,29 +182,45 @@ body {
   user-select: none;
 }
 .hc {
-  width: 28px; height: 22px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 8px;
-  font-weight: 700;
+  width: 30px; height: 42px;
+  display: flex;
+  flex-direction: column;
   border-radius: 2px;
-  background: #1a1a2e;
-  color: #555;
+  overflow: hidden;
   position: relative;
+  cursor: crosshair;
 }
-/* Active player colors */
-.hc.a-check  { background: #145a32; color: #7dcea0; }
-.hc.a-call   { background: #145a32; color: #7dcea0; }
-.hc.a-bet    { background: #6e1515; color: #f1948a; }
-.hc.a-raise  { background: #6e1515; color: #f1948a; }
-.hc.a-fold   { background: #1a3a6b; color: #7fb3d3; }
-.hc.a-none   { background: #2a2a3a; color: #444; }
-/* Opponent view */
-.hc.o-in  { background: #7d6608; color: #f9e79f; }
-.hc.o-out { background: #1e1e2e; color: #333; }
-/* Drag selection highlight */
-.hc.drag-sel { outline: 2px solid rgba(255,255,255,0.8); outline-offset: -1px; z-index: 1; }
-/* Mixed (partial suit assignments) */
-.hc.a-mixed { background: linear-gradient(135deg, #145a32 50%, #6e1515 50%); color: #fff; }
+.hc-label {
+  height: 11px;
+  flex-shrink: 0;
+  background: #0f0f1e;
+  color: #777;
+  font-size: 6.5px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 11px;
+  pointer-events: none;
+}
+.hc-suits { flex: 1; display: grid; min-height: 0; }
+.hcs-suited  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.hcs-offsuit { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr 1fr; }
+.hcs-pair    { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.hc-suit { background: #0a0a15; }
+.hc.drag-sel { outline: 2px solid rgba(255,255,255,0.85); outline-offset: -1px; z-index: 3; }
+
+/* Suit filter panel */
+#suit-filter { border-top: 1px solid #1a3a5a; margin-top: 3px; padding-top: 3px; }
+.sf-toggle { background:none; border:none; color:#7fb3d3; font-size:0.73em; cursor:pointer; width:100%; text-align:left; padding:2px 0; }
+.sf-toggle:hover { color:#bbb; }
+#sf-body { margin-top:4px; display:flex; flex-direction:column; gap:5px; }
+.sf-section { display:flex; flex-direction:column; gap:2px; }
+.sf-sec-hdr { display:flex; align-items:center; justify-content:space-between; font-size:0.65em; color:#555; }
+.sf-sec-hdr button { background:none; border:none; color:#444; font-size:0.85em; cursor:pointer; padding:0 2px; }
+.sf-sec-hdr button:hover { color:#888; }
+.sf-grid { display:grid; gap:2px; }
+.sf-btn { background:#0f3460; border:1px solid #1a5276; border-radius:2px; font-size:0.68em; padding:2px 1px; cursor:pointer; text-align:center; line-height:1.2; }
+.sf-btn.off { background:#0a0f1a; border-color:#111; opacity:0.35; }
+.sf-btn:hover { filter:brightness(1.3); }
 
 /* Range summary */
 .range-sum {
@@ -402,50 +418,6 @@ body {
 }
 #next-btn:hover { filter: brightness(1.1); }
 
-/* Suit selector popup */
-#suit-pop {
-  display: none;
-  position: fixed;
-  background: #16213e;
-  border: 1px solid #1a5276;
-  border-radius: 8px;
-  padding: 10px;
-  z-index: 200;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-  flex-direction: column;
-  gap: 6px;
-  max-width: 220px;
-}
-#suit-pop.show { display: flex; }
-#suit-pop h4 { font-size: 0.8em; color: #aaa; text-align: center; }
-.suit-opts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-.sopt {
-  background: #0f3460;
-  border: 1px solid #1a5276;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 0.78em;
-  cursor: pointer;
-  color: #aaa;
-}
-.sopt:hover { background: #1a5276; }
-.sopt.on { background: #1a5276; border-color: #3498db; color: #fff; }
-.sopt.used { opacity: 0.45; }
-.suit-pop-btns { display: flex; gap: 5px; justify-content: center; }
-.sp-btn {
-  background: #0f3460;
-  border: 1px solid #1a5276;
-  color: #aaa;
-  border-radius: 3px;
-  padding: 3px 8px;
-  font-size: 0.75em;
-  cursor: pointer;
-}
-.sp-btn:hover { background: #1a5276; }
 
 /* Showdown overlay */
 #showdown-overlay {
@@ -572,6 +544,10 @@ body {
           <span>bb</span>
         </div>
         <div class="presets" id="presets"></div>
+        <div id="suit-filter">
+          <button class="sf-toggle" id="sf-toggle-btn" onclick="RP.toggleSF()">▸ Suit Filter</button>
+          <div id="sf-body" style="display:none"></div>
+        </div>
         <div class="submit-row">
           <button class="btn-draft" onclick="RP.saveDraft()">Save Draft</button>
           <button class="btn-submit" onclick="RP.submit()">Submit</button>
@@ -602,16 +578,6 @@ body {
   </div>
 </div>
 
-<!-- SUIT SELECTOR POPUP -->
-<div id="suit-pop">
-  <h4 id="sp-title">Choose combos</h4>
-  <div class="suit-opts" id="sp-opts"></div>
-  <div class="suit-pop-btns">
-    <button class="sp-btn" onclick="RP.spAll()">All</button>
-    <button class="sp-btn" onclick="RP.spNone()">None</button>
-    <button class="sp-btn" onclick="RP.spClose()">Done</button>
-  </div>
-</div>
 
 <!-- SHOWDOWN OVERLAY -->
 <div id="showdown-overlay">
@@ -639,6 +605,39 @@ var RP = (function() {
   var SYM   = {s:'♠', h:'♥', d:'♦', c:'♣'};
   var CLR   = {s:'black', h:'red', d:'red', c:'black'};
   var RVAL  = {A:14,K:13,Q:12,J:11,T:10,9:9,8:8,7:7,6:6,5:5,4:4,3:3,2:2};
+  var SCLR  = {s:'#9ab',h:'#e74c3c',d:'#e74c3c',c:'#9ab'};
+
+  var SUITED_SUITS  = ['ss','hh','dd','cc'];
+  var OFFSUIT_SUITS = ['sh','sd','sc','hs','hd','hc','ds','dh','dc','cs','ch','cd'];
+  var PAIR_SUITS    = ['sh','sd','sc','hd','hc','dc'];
+
+  var suitFilter = {
+    suited:  new Set(SUITED_SUITS),
+    offsuit: new Set(OFFSUIT_SUITS),
+    pair:    new Set(PAIR_SUITS)
+  };
+
+  function cellType(r,c){ return r===c?'pair':r<c?'suited':'offsuit'; }
+  function typeSuits(t){ return t==='suited'?SUITED_SUITS:t==='pair'?PAIR_SUITS:OFFSUIT_SUITS; }
+
+  function htSuitKey(r,c,suit) {
+    var s1=suit[0],s2=suit[1];
+    if(r===c) return cKey(RANKS[r]+s1, RANKS[r]+s2);
+    if(r<c)   return cKey(RANKS[r]+s1, RANKS[c]+s1); // suited: both same suit
+    return cKey(RANKS[c]+s1, RANKS[r]+s2); // offsuit: RANKS[c] is higher rank
+  }
+
+  function actionColor(action) {
+    if(action==='check'||action==='call') return '#145a32';
+    if(action==='bet'  ||action==='raise') return '#6e1515';
+    if(action==='fold') return '#1a3a6b';
+    return '#1a1a2e';
+  }
+
+  function suitSymHtml(suit) {
+    return '<span style="color:'+SCLR[suit[0]]+'">'+SYM[suit[0]]+'</span>'+
+           '<span style="color:'+SCLR[suit[1]]+'">'+SYM[suit[1]]+'</span>';
+  }
 
   // ---- Game State ----
   var G = null;
@@ -1033,32 +1032,28 @@ var RP = (function() {
   // ---- Chart rendering ----
   function colorChart(pid, isActive) {
     var chart=$('chart'+pid);
-    var cells=chart.querySelectorAll('.hc');
-    cells.forEach(function(cell) {
+    chart.querySelectorAll('.hc').forEach(function(cell) {
       var r=+cell.dataset.r, c=+cell.dataset.c;
-      // Strip all action classes
-      cell.className='hc';
-      if (cell.dataset.dragsel==='1') cell.classList.add('drag-sel');
-
-      if (isActive) {
-        var map=G.ranges[pid][r][c];
-        var acts=Object.values(map);
-        if (acts.length===0) { cell.classList.add('a-none'); return; }
-        var cnt={};
-        acts.forEach(a=>{cnt[a]=(cnt[a]||0)+1;});
-        var total=acts.length;
-        var dom=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
-        if (dom[1]<total) { cell.classList.add('a-mixed'); }
-        else { cell.classList.add('a-'+dom[0]); }
-      } else {
-        if (G.narrowed[pid]!==null) {
-          var map2=G.ranges[pid] ? G.ranges[pid][r][c] : null;
-          var inR=map2 && Object.keys(map2).some(k=>G.narrowed[pid].has(k));
-          cell.classList.add(inR?'o-in':'o-out');
+      var type=cellType(r,c);
+      var suits=typeSuits(type);
+      var map=G.ranges[pid] ? G.ranges[pid][r][c] : null;
+      cell.querySelectorAll('.hc-suit').forEach(function(sr, idx) {
+        var suit=suits[idx];
+        var ck=map ? htSuitKey(r,c,suit) : null;
+        var inRange=map && (ck in map);
+        if (!inRange) {
+          sr.style.background='#0a0a15';
+        } else if (isActive) {
+          if (!suitFilter[type].has(suit)) {
+            sr.style.background='#1c1c2e'; // toggled off — shown as dim gray
+          } else {
+            sr.style.background=actionColor(map[ck]);
+          }
         } else {
-          cell.classList.add('o-in');
+          var inNarrowed=G.narrowed[pid]===null || G.narrowed[pid].has(ck);
+          sr.style.background=inNarrowed ? '#7d6608' : '#0a0a15';
         }
-      }
+      });
     });
   }
 
@@ -1087,7 +1082,20 @@ var RP = (function() {
       cell.className='hc';
       cell.dataset.r=r; cell.dataset.c=c;
       cell.dataset.dragsel='0';
-      cell.textContent=cellHT(r,c);
+      var lbl=document.createElement('div');
+      lbl.className='hc-label';
+      lbl.textContent=cellHT(r,c);
+      cell.appendChild(lbl);
+      var type=cellType(r,c);
+      var sg=document.createElement('div');
+      sg.className='hc-suits hcs-'+type;
+      for (var suit of typeSuits(type)) {
+        var sr=document.createElement('div');
+        sr.className='hc-suit';
+        sr.dataset.suit=suit;
+        sg.appendChild(sr);
+      }
+      cell.appendChild(sg);
       chart.appendChild(cell);
     }
   }
@@ -1163,69 +1171,71 @@ var RP = (function() {
   document.addEventListener('mouseup', function(e) {
     if (!drag.on) return;
     drag.on=false;
-    // Single cell → suit popup
-    if (drag.gesture.size===1) {
-      var [key]=[...drag.gesture];
-      var [r,c]=key.split(',').map(Number);
-      showSuitPop(r,c,e.clientX,e.clientY);
-    }
-    // Multi-cell drag stays highlighted, user clicks action button
+    // Selection stays highlighted; click an action button to assign
   });
 
-  // ---- Suit popup ----
-  var sp = { r:-1, c:-1, selected: new Set() };
+  // ---- Suit filter ----
+  function toggleSF() {
+    var body=$('sf-body');
+    var open=body.style.display!=='none';
+    body.style.display=open?'none':'flex';
+    $('sf-toggle-btn').textContent=(open?'▸':'▾')+' Suit Filter';
+  }
 
-  function showSuitPop(r,c,x,y) {
-    sp.r=r; sp.c=c; sp.selected=new Set();
-    var ht=cellHT(r,c);
-    $('sp-title').textContent=ht+' — choose combos';
-    var opts=$('sp-opts');
-    opts.innerHTML='';
-    var combos=combosFor(ht);
-    var pid=G.actPid;
-    var map=G.ranges[pid][r][c];
-    for (var combo of combos) {
-      var c1=combo.slice(0,2), c2=combo.slice(2,4);
-      var ck=cKey(c1,c2);
-      // Skip combos not in this player's current range
-      if (!(ck in map)) continue;
-      var label=cRank(c1)+SYM[cSuit(c1)]+cRank(c2)+SYM[cSuit(c2)];
-      var btn=document.createElement('button');
-      btn.className='sopt';
-      btn.dataset.combo=combo;
-      btn.style.color=(CLR[cSuit(c1)]==='red'||CLR[cSuit(c2)]==='red')?'#e74c3c':'#aaa';
-      btn.textContent=label;
-      btn.title=map[ck]?'currently: '+map[ck]:'unassigned';
-      btn.addEventListener('click', function(ev) {
-        var btn2=ev.currentTarget;
-        btn2.classList.toggle('on');
-        if (btn2.classList.contains('on')) sp.selected.add(btn2.dataset.combo);
-        else sp.selected.delete(btn2.dataset.combo);
-      });
-      opts.appendChild(btn);
+  function buildSuitFilterUI() {
+    var body=$('sf-body');
+    if (!body) return;
+    body.innerHTML='';
+
+    function makeSection(label, type, suits, cols) {
+      var sec=document.createElement('div');
+      sec.className='sf-section';
+      var hdr=document.createElement('div');
+      hdr.className='sf-sec-hdr';
+      var lbl=document.createElement('span');
+      lbl.textContent=label;
+      var ab=document.createElement('button'); ab.textContent='All';
+      ab.onclick=function(){ sfSetAll(type,true); };
+      var nb=document.createElement('button'); nb.textContent='None';
+      nb.onclick=function(){ sfSetAll(type,false); };
+      var bwrap=document.createElement('span');
+      bwrap.appendChild(ab); bwrap.appendChild(nb);
+      hdr.appendChild(lbl); hdr.appendChild(bwrap);
+      sec.appendChild(hdr);
+      var grid=document.createElement('div');
+      grid.className='sf-grid';
+      grid.style.gridTemplateColumns='repeat('+cols+',1fr)';
+      for (var suit of suits) {
+        var btn=document.createElement('button');
+        btn.className='sf-btn'+(suitFilter[type].has(suit)?'':' off');
+        btn.id='sf-'+type+'-'+suit;
+        btn.innerHTML=suitSymHtml(suit);
+        (function(t,s,b){ btn.addEventListener('click',function(){ sfToggle(t,s,b); }); })(type,suit,btn);
+        grid.appendChild(btn);
+      }
+      sec.appendChild(grid);
+      body.appendChild(sec);
     }
-    var pop=$('suit-pop');
-    var px=Math.min(x+5, window.innerWidth-230);
-    var py=Math.min(y+5, window.innerHeight-200);
-    pop.style.left=px+'px'; pop.style.top=py+'px';
-    pop.classList.add('show');
+
+    makeSection('Suited',  'suited',  SUITED_SUITS,  4);
+    makeSection('Offsuit', 'offsuit', OFFSUIT_SUITS, 3);
+    makeSection('Pairs',   'pair',    PAIR_SUITS,    3);
   }
 
-  function spAll() {
-    $('sp-opts').querySelectorAll('.sopt').forEach(function(b){
-      b.classList.add('on');
-      sp.selected.add(b.dataset.combo);
-    });
+  function sfToggle(type, suit, btn) {
+    if (suitFilter[type].has(suit)) { suitFilter[type].delete(suit); btn.classList.add('off'); }
+    else { suitFilter[type].add(suit); btn.classList.remove('off'); }
+    if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
   }
-  function spNone() {
-    $('sp-opts').querySelectorAll('.sopt').forEach(function(b){
-      b.classList.remove('on');
-    });
-    sp.selected.clear();
-  }
-  function spClose() {
-    $('suit-pop').classList.remove('show');
-    // Don't auto-assign; user clicks action button to assign
+
+  function sfSetAll(type, on) {
+    var suits=typeSuits(type);
+    for (var suit of suits) {
+      if (on) suitFilter[type].add(suit); else suitFilter[type].delete(suit);
+      var btn=$('sf-'+type+'-'+suit);
+      if (btn) btn.classList.toggle('off',!on);
+    }
+    if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
   }
 
   // ---- Action panel ----
@@ -1266,10 +1276,7 @@ var RP = (function() {
       actMode=mode;
       highlightABtn(mode);
       updateBetUI(G.actPid);
-      // If anything selected, assign it
-      if (drag.cells.size>0||sp.selected.size>0) {
-        assignSelection(G.actPid, mode);
-      }
+      if (drag.cells.size>0) assignSelection(G.actPid, mode);
     });
     $('abtns').appendChild(b);
   }
@@ -1320,39 +1327,26 @@ var RP = (function() {
   function hideActionPanel() {
     $('action-panel').classList.add('hidden');
     drag.cells=new Set();
-    sp.selected=new Set();
-    $('suit-pop').classList.remove('show');
   }
 
   // ---- Assign selection ----
   function assignSelection(pid, action) {
-    var pid2=pid;
-    var suitCombos=null;
-    if (sp.selected.size>0 && drag.cells.size===1) {
-      suitCombos=new Set();
-      sp.selected.forEach(function(combo){
-        var c1=combo.slice(0,2), c2=combo.slice(2,4);
-        suitCombos.add(cKey(c1,c2));
-      });
-    }
-    drag.cells.forEach(function(key){
+    drag.cells.forEach(function(key) {
       var parts=key.split(',');
       var r=+parts[0], c=+parts[1];
-      var map=G.ranges[pid2][r][c];
-      for (var ck of Object.keys(map)) {
-        if (suitCombos===null||suitCombos.has(ck)) {
-          map[ck]=action;
-        }
+      var map=G.ranges[pid][r][c];
+      var type=cellType(r,c);
+      var filter=suitFilter[type];
+      for (var suit of typeSuits(type)) {
+        if (!filter.has(suit)) continue;
+        var ck=htSuitKey(r,c,suit);
+        if (ck in map) map[ck]=action;
       }
     });
-
-    // Clear drag & suit selection
     drag.cells=new Set();
-    sp.selected=new Set();
-    $('suit-pop').classList.remove('show');
     refreshDragHighlight();
-    colorChart(pid2, true);
-    updateRangeSum(pid2);
+    colorChart(pid, true);
+    updateRangeSum(pid);
   }
 
   // ---- Draft & Submit ----
@@ -1548,6 +1542,7 @@ var RP = (function() {
     G.pot=0; G.bets=[0,0];
     G.handOver=true;
     updateUI();
+    renderHole(0,true); renderHole(1,true);
     addLog(G.cfg.names[winnerPid]+' wins '+fmt(pot)+' (opponent folded)', true);
     setMsg(G.cfg.names[winnerPid]+' wins the pot — opponent folded');
     $('next-btn').textContent=G.stacks[0]>0&&G.stacks[1]>0?'Next Hand':'Play Again';
@@ -1612,25 +1607,17 @@ var RP = (function() {
     submit: function(){ submit(false); },
     nextHand: nextHand,
     closeShowdown: closeShowdown,
-    spAll: spAll,
-    spNone: spNone,
-    spClose: spClose,
+    toggleSF: toggleSF,
     setSelMode: setSelMode,
-    _initCharts: initCharts
+    _initCharts: initCharts,
+    _buildSuitFilter: buildSuitFilterUI
   };
 })();
 
 // Init charts on page load
 document.addEventListener('DOMContentLoaded', function(){
   RP._initCharts();
-
-  // Close suit popup on outside click
-  document.addEventListener('mousedown', function(e){
-    var pop=document.getElementById('suit-pop');
-    if (pop.classList.contains('show') && !pop.contains(e.target) && !e.target.closest('.hc')) {
-      // Don't close automatically — user must press Done
-    }
-  });
+  RP._buildSuitFilter();
 });
 </script>
 </body>
