@@ -24,6 +24,10 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 - `ranges[pid][r][c]` — map of `comboKey → action` for every cell in the 13×13 chart
 - `narrowed[pid]` — `Set<comboKey>` of combos still in a player's range after they've acted; `null` means "full range". Persists across streets within a hand; reset to `null` only at `dealHand()`.
 - `board` — array of dealt community cards (excluded when building ranges to keep combo count at 1326, not 1225)
+- `hole[pid]` — two-card array of dealt hole cards; used only at showdown/reveal
+- `deck` — shuffled array; cards popped from the end
+- `dealer` — pid of the button/SB (0 or 1); swaps each hand
+- `streetChecked[pid]` — tracks whether each player checked this street; both `true` triggers `advanceStreet()`
 - `actPid`, `street`, `curBetTo`, `lastRaiseAmt`, `bets`, `pot`, `stacks`
 
 **Hand chart representation**
@@ -36,7 +40,13 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 **Turn flow**
 1. `startTurn(pid)` → `initRange(pid)` (builds/rebuilds ranges respecting `narrowed`) → `showActionPanel(pid)`
 2. Player drag-selects cells on their chart; action buttons assign the chosen action to `drag.cells`
-3. `submit()` → `execAction()` → updates `G.narrowed[pid]` from submitted ranges → `checkAdvance()` → next turn or next street
+3. `submit()` → `execAction()` → updates `G.narrowed[pid]` from submitted ranges → `checkAdvance(pid)` → next turn or next street
+
+**`checkAdvance(pid)`** — determines what happens after a check: preflop the SB checks first then BB gets the option; postflop BB acts first, and if `G.streetChecked[opp]` is already true both players have checked so `advanceStreet()` is called. Bet/raise/call/fold paths skip `checkAdvance` and call `advanceStreet()` or end the hand directly.
+
+**Street advance & showdown** — `advanceStreet()` records `prevLen = G.board.length`, pushes new cards onto `G.board`, then calls `renderBoard(prevLen)` so only the newly added cards animate in. When all streets are done or someone folds, `showdown()` / `foldWin()` populates the `#showdown-overlay` and calls `renderHole(pid, true)` to flip both players' hole cards face-up. All-in with cards to come calls `runOutBoard()` which deals remaining board cards then triggers `showdown()` after an 800 ms delay.
+
+**Card reveal animation** — `renderBoard(newFrom)` applies a `ccReveal` CSS animation only to cards at index ≥ `newFrom`, with a 90 ms stagger per card (0 / 90 / 180 ms for the flop). Passing `null` (initial deal) skips animation entirely.
 
 **Range narrowing** — after a player submits, `G.narrowed[pid]` is set to the union of all combo keys that got assigned to the action they actually took. `initRange` checks this set on subsequent turns so grayed-out (eliminated) combos are excluded from the map entirely.
 

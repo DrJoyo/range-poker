@@ -508,6 +508,10 @@ body {
   from { transform: scale(0.65); opacity: 0; }
   to   { transform: scale(1);    opacity: 1; }
 }
+@keyframes ccReveal {
+  from { opacity: 0; transform: translateY(8px) scale(0.88); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
 #showdown-box {
   background: linear-gradient(145deg, #16233e, #0d1828);
   border: 2px solid #f0c040;
@@ -1044,11 +1048,18 @@ var RP = (function() {
     for (var c of G.hole[pid]) el.appendChild(makeCard(c, !reveal));
   }
 
-  function renderBoard() {
+  function renderBoard(newFrom) {
     for (var i=0;i<5;i++) {
       var slot=$('cc'+i);
       slot.innerHTML='';
-      if (G.board[i]) slot.appendChild(makeCard(G.board[i],false));
+      if (G.board[i]) {
+        var card=makeCard(G.board[i],false);
+        if (newFrom!=null && i>=newFrom) {
+          var delay=(i-newFrom)*90;
+          card.style.animation='ccReveal 0.22s ease-out '+delay+'ms both';
+        }
+        slot.appendChild(card);
+      }
     }
   }
 
@@ -1091,9 +1102,10 @@ var RP = (function() {
     collectBets();
     if (idx>=3) { showdown(); return; }
     var next=order[idx+1];
+    var prevLen=G.board.length;
     if (next==='flop')  { G.board.push(G.deck.pop(),G.deck.pop(),G.deck.pop()); }
     else                { G.board.push(G.deck.pop()); }
-    renderBoard();
+    renderBoard(prevLen);
     startStreet(next);
   }
 
