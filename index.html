@@ -7,7 +7,7 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  background: #1a1a2e;
+  background: radial-gradient(ellipse at 50% 35%, #1e2d44 0%, #0f1a2b 55%, #070d18 100%);
   color: #e0e0e0;
   font-family: 'Segoe UI', Arial, sans-serif;
   min-height: 100vh;
@@ -75,6 +75,7 @@ body {
   min-height: 100vh;
   padding: 6px;
   gap: 6px;
+  background: radial-gradient(ellipse at 50% 45%, rgba(10,40,15,0.35) 0%, transparent 55%);
 }
 
 /* Top bar */
@@ -180,6 +181,7 @@ body {
   padding: 1px;
   cursor: crosshair;
   user-select: none;
+  margin-top: 24px;
 }
 .hc {
   width: 30px; height: 42px;
@@ -221,8 +223,11 @@ body {
 #sf-body { margin-top:4px; display:flex; flex-direction:column; gap:5px; }
 .sf-section { display:flex; flex-direction:column; gap:2px; }
 .sf-sec-hdr { display:flex; align-items:center; justify-content:space-between; font-size:0.65em; color:#555; }
-.sf-sec-hdr button { background:none; border:none; color:#444; font-size:0.85em; cursor:pointer; padding:0 2px; }
-.sf-sec-hdr button:hover { color:#888; }
+.sf-sec-hdr button { background:#1a3a5a; border:1px solid #2a5a8a; color:#9ab; font-size:0.8em; cursor:pointer; padding:1px 5px; border-radius:2px; }
+.sf-sec-hdr button:hover { filter:brightness(1.3); }
+.sf-global-row { display:flex; gap:5px; justify-content:center; margin-bottom:5px; }
+.sf-global-btn { background:#1a3a5a; border:1px solid #2a5a8a; color:#9ab; font-size:0.7em; cursor:pointer; padding:2px 10px; border-radius:3px; }
+.sf-global-btn:hover { filter:brightness(1.3); }
 .sf-grid { display:grid; gap:2px; }
 .sf-btn { background:#0f3460; border:1px solid #1a5276; border-radius:2px; font-size:0.68em; padding:2px 1px; cursor:pointer; text-align:center; line-height:1.2; }
 .sf-btn.off { background:#0a0f1a; border-color:#111; opacity:0.35; }
@@ -246,24 +251,51 @@ body {
   width: 38px; height: 54px;
   background: #fff;
   border-radius: 5px;
-  border: 1px solid #bbb;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1em; font-weight: 800;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+  border: 1px solid #ccc;
+  position: relative;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.7), 0 1px 2px rgba(0,0,0,0.4);
   flex-shrink: 0;
-}
-.card.down {
-  background: repeating-linear-gradient(45deg, #1a3a6b, #1a3a6b 4px, #0f2848 4px, #0f2848 8px);
-  border-color: #0a1e3a;
+  overflow: hidden;
 }
 .card.red { color: #c0392b; }
 .card.black { color: #111; }
+.card.down {
+  background: linear-gradient(145deg, #0e2144, #091830);
+  border: 2px solid #c9a227;
+}
+.card.down::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(201,162,39,0.35);
+  border-radius: 2px;
+  background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(201,162,39,0.05) 3px, rgba(201,162,39,0.05) 4px),
+              repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(201,162,39,0.05) 3px, rgba(201,162,39,0.05) 4px);
+}
+.card-corner {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.card-tl { top: 2px; left: 2px; }
+.card-br { bottom: 2px; right: 2px; transform: rotate(180deg); }
+.card-rank { font-size: 9.5px; font-weight: 900; color: inherit; }
+.card-suit-sm { font-size: 7.5px; color: inherit; }
+.card-ctr {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  color: inherit;
+}
 
 .bet-disp { font-size: 1.1em; font-weight: 700; color: #f0c040; position: absolute; top: 50%; transform: translateY(-50%); white-space: nowrap; }
 #bdisp0 { left: calc(100% + 8px); }
 #bdisp1 { right: calc(100% + 8px); }
 .stack-disp { font-size: 1.05em; font-weight: 600; color: #f0c040; text-align: center; min-height: 14px; }
-.hole-area { position: relative; display: inline-block; }
+.hole-area { position: relative; display: inline-block; margin-top: 12px; }
 .waiting { font-size: 0.72em; color: #444; font-style: italic; text-align: center; min-height: 14px; }
 
 /* Center column */
@@ -272,17 +304,16 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding-top: 46px;
-  position: relative;
+  padding-top: 58px;
+}
+#action-panel {
+  margin-top: 14px;
 }
 #board-section {
-  position: absolute;
-  top: 554px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  pointer-events: none;
 }
 #pot-disp {
   font-size: 1.3em;
@@ -438,8 +469,14 @@ body {
   overflow-y: auto;
   width: 100%;
 }
-.log-line { margin-bottom: 1px; }
-.log-line.hi { color: #f0c040; }
+.log-line { margin-bottom: 2px; }
+.log-line.log-info  { color: #555; }
+.log-line.log-fold  { color: #5b8fd4; }
+.log-line.log-check { color: #4db87a; }
+.log-line.log-call  { color: #4db87a; }
+.log-line.log-bet   { color: #e07030; }
+.log-line.log-raise { color: #e04545; }
+.log-line.log-result { color: #f0c040; font-weight: 700; }
 
 #next-btn {
   display: none;
@@ -460,28 +497,41 @@ body {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.75);
+  background: rgba(0,0,0,0.8);
   z-index: 300;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(3px);
 }
 #showdown-overlay.show { display: flex; }
+@keyframes sdIn {
+  from { transform: scale(0.65); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
 #showdown-box {
-  background: #16213e;
+  background: linear-gradient(145deg, #16233e, #0d1828);
   border: 2px solid #f0c040;
-  border-radius: 12px;
-  padding: 28px 36px;
+  border-radius: 14px;
+  padding: 24px 28px;
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-width: 300px;
+  gap: 14px;
+  min-width: 360px;
+  box-shadow: 0 0 50px rgba(240,192,64,0.2), 0 20px 60px rgba(0,0,0,0.8);
+  animation: sdIn 0.35s cubic-bezier(0.34,1.56,0.64,1);
 }
-#sd-title { color: #f0c040; font-size: 1.5em; font-weight: 700; }
-.sd-hand { color: #aaa; font-size: 0.88em; }
-.sd-cards { display: flex; gap: 4px; justify-content: center; }
-.sd-cards .card { width: 34px; height: 48px; font-size: 0.88em; }
-#sd-pot { color: #27ae60; font-size: 1.1em; font-weight: 700; }
+#sd-title { color: #f0c040; font-size: 1.8em; font-weight: 800; text-shadow: 0 0 25px rgba(240,192,64,0.4); letter-spacing: 0.04em; text-transform: uppercase; }
+#sd-players { display: flex; align-items: center; gap: 10px; }
+.sd-player { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+.sd-player.sd-winner { background: rgba(240,192,64,0.08); border-color: rgba(240,192,64,0.35); box-shadow: 0 0 20px rgba(240,192,64,0.12); }
+.sd-player.sd-loser { opacity: 0.5; }
+.sd-pname { font-size: 0.82em; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.04em; }
+.sd-hdesc { font-size: 0.72em; color: #888; font-style: italic; text-align: center; }
+.sd-cards { display: flex; gap: 5px; justify-content: center; }
+.sd-cards .card { width: 38px; height: 54px; }
+#sd-vs { font-size: 0.7em; font-weight: 700; color: #444; letter-spacing: 0.1em; }
+#sd-pot { color: #2ecc71; font-size: 1.15em; font-weight: 700; border-top: 1px solid #1a3a5a; padding-top: 10px; }
 .btn-continue {
   background: linear-gradient(135deg, #f0c040, #e67e22);
   color: #111;
@@ -546,18 +596,29 @@ body {
         <span class="timer-text" id="ttext0">20s</span>
         <div class="timer-bar"><div class="timer-fill" id="tfill0"></div></div>
       </div>
-      <div class="hand-chart" id="chart0"></div>
-      <div class="range-sum" id="rsum0"></div>
       <div class="hole-area">
         <div class="hole-cards" id="hc0"></div>
         <div class="bet-disp" id="bdisp0"></div>
       </div>
       <div class="stack-disp" id="sdisp0"></div>
+      <div class="hand-chart" id="chart0"></div>
+      <div class="range-sum" id="rsum0"></div>
       <div class="waiting" id="wait0"></div>
     </div>
 
     <!-- CENTER (col 3) -->
     <div id="center-col">
+      <div id="board-section">
+        <div id="community-cards">
+          <div class="cc-slot" id="cc0"></div>
+          <div class="cc-slot" id="cc1"></div>
+          <div class="cc-slot" id="cc2"></div>
+          <div class="cc-slot" id="cc3"></div>
+          <div class="cc-slot" id="cc4"></div>
+        </div>
+        <div id="pot-disp">Pot: 0bb</div>
+      </div>
+
       <div id="action-panel">
         <div id="action-prompt">Select hands then click action</div>
         <div id="sel-mode-row">
@@ -591,17 +652,6 @@ body {
       <div id="log"></div>
       <button id="next-btn" onclick="RP.nextHand()">Next Hand</button>
       <button id="debug-btn" onclick="RP.toggleDebug()" style="background:#0f3460;border:1px solid #1a5276;color:#555;border-radius:5px;padding:4px 10px;font-size:0.72em;cursor:pointer;margin-top:2px;">🔍 Debug: Off</button>
-
-      <div id="board-section">
-        <div id="community-cards">
-          <div class="cc-slot" id="cc0"></div>
-          <div class="cc-slot" id="cc1"></div>
-          <div class="cc-slot" id="cc2"></div>
-          <div class="cc-slot" id="cc3"></div>
-          <div class="cc-slot" id="cc4"></div>
-        </div>
-        <div id="pot-disp">Pot: 0bb</div>
-      </div>
     </div>
 
     <!-- P2 panel (col 4) -->
@@ -615,13 +665,13 @@ body {
         <span class="timer-text" id="ttext1">20s</span>
         <div class="timer-bar"><div class="timer-fill" id="tfill1"></div></div>
       </div>
-      <div class="hand-chart" id="chart1"></div>
-      <div class="range-sum" id="rsum1"></div>
       <div class="hole-area">
         <div class="bet-disp" id="bdisp1"></div>
         <div class="hole-cards" id="hc1"></div>
       </div>
       <div class="stack-disp" id="sdisp1"></div>
+      <div class="hand-chart" id="chart1"></div>
+      <div class="range-sum" id="rsum1"></div>
       <div class="waiting" id="wait1"></div>
     </div>
 
@@ -635,12 +685,21 @@ body {
 <div id="showdown-overlay">
   <div id="showdown-box">
     <div id="sd-title">Showdown</div>
-    <div class="sd-hand" id="sd-h0"></div>
-    <div class="sd-cards" id="sd-c0"></div>
-    <div class="sd-hand" id="sd-h1"></div>
-    <div class="sd-cards" id="sd-c1"></div>
+    <div id="sd-players">
+      <div class="sd-player" id="sd-p0">
+        <div class="sd-pname" id="sd-pname0"></div>
+        <div class="sd-cards" id="sd-c0"></div>
+        <div class="sd-hdesc" id="sd-h0"></div>
+      </div>
+      <div id="sd-vs">VS</div>
+      <div class="sd-player" id="sd-p1">
+        <div class="sd-pname" id="sd-pname1"></div>
+        <div class="sd-cards" id="sd-c1"></div>
+        <div class="sd-hdesc" id="sd-h1"></div>
+      </div>
+    </div>
     <div id="sd-pot"></div>
-    <button class="btn-continue" onclick="RP.closeShowdown()">Continue</button>
+    <button class="btn-continue" onclick="RP.closeShowdown()">Continue →</button>
   </div>
 </div>
 
@@ -680,10 +739,10 @@ var RP = (function() {
   }
 
   function actionColor(action) {
-    if(action==='check'||action==='call') return '#145a32';
-    if(action==='bet'  ||action==='raise') return '#6e1515';
-    if(action==='fold') return '#1a3a6b';
-    return '#1a1a2e';
+    if(action==='check'||action==='call') return '#1a8a44';
+    if(action==='bet'  ||action==='raise') return '#9b2020';
+    if(action==='fold') return '#1e4a96';
+    return '#0d0d1a';
   }
 
   function suitSymHtml(suit) {
@@ -856,10 +915,10 @@ var RP = (function() {
     return (s.endsWith('.0') ? bb+'bb' : s+'bb');
   }
   function setMsg(txt) { $('msg-banner').textContent = txt; }
-  function addLog(txt, hi) {
+  function addLog(txt, type) {
     var el=$('log');
     var d=document.createElement('div');
-    d.className='log-line'+(hi?' hi':'');
+    d.className='log-line'+(type?' '+type:'');
     d.textContent=txt;
     el.appendChild(d);
     el.scrollTop=el.scrollHeight;
@@ -867,8 +926,19 @@ var RP = (function() {
   function makeCard(card, faceDown) {
     var d=document.createElement('div');
     d.className='card';
-    if (faceDown) { d.classList.add('down'); }
-    else { d.classList.add(cColor(card)); d.textContent=cDisp(card); }
+    if (faceDown) {
+      d.classList.add('down');
+    } else {
+      d.classList.add(cColor(card));
+      var rank=cRank(card), sym=SYM[cSuit(card)];
+      var dr=rank==='T'?'10':rank;
+      var tl=document.createElement('div'); tl.className='card-corner card-tl';
+      tl.innerHTML='<div class="card-rank">'+dr+'</div><div class="card-suit-sm">'+sym+'</div>';
+      var ctr=document.createElement('div'); ctr.className='card-ctr'; ctr.textContent=sym;
+      var br=document.createElement('div'); br.className='card-corner card-br';
+      br.innerHTML='<div class="card-rank">'+dr+'</div><div class="card-suit-sm">'+sym+'</div>';
+      d.appendChild(tl); d.appendChild(ctr); d.appendChild(br);
+    }
     return d;
   }
 
@@ -992,7 +1062,7 @@ var RP = (function() {
     G.curBetTo=bbAmt;
     G.lastRaiseAmt=bbAmt;
     G.pot=0;
-    addLog(G.cfg.names[sb]+' posts SB '+fmt(sbAmt)+', '+G.cfg.names[bb]+' posts BB '+fmt(bbAmt));
+    addLog(G.cfg.names[sb]+' posts SB '+fmt(sbAmt)+', '+G.cfg.names[bb]+' posts BB '+fmt(bbAmt), 'log-info');
     updateUI();
   }
 
@@ -1149,7 +1219,7 @@ var RP = (function() {
     }
     if (total===0) { distEl.textContent=''; barEl.innerHTML=''; return; }
     var order=['fold','check','call','bet','raise'];
-    var colors={fold:'#1a5276',check:'#1e8449',call:'#1e8449',bet:'#922b21',raise:'#922b21'};
+    var colors={fold:'#1e4a96',check:'#1a8a44',call:'#1a8a44',bet:'#9b2020',raise:'#9b2020'};
     var parts=[];
     order.forEach(function(a){
       if (counts[a]) parts.push({a:a,n:counts[a]});
@@ -1339,6 +1409,15 @@ var RP = (function() {
       sec.appendChild(grid);
       body.appendChild(sec);
     }
+
+    var globalRow=document.createElement('div');
+    globalRow.className='sf-global-row';
+    var gab=document.createElement('button'); gab.className='sf-global-btn'; gab.textContent='All';
+    gab.onclick=function(){ sfSetAll('suited',true); sfSetAll('offsuit',true); sfSetAll('pair',true); };
+    var gnb=document.createElement('button'); gnb.className='sf-global-btn'; gnb.textContent='None';
+    gnb.onclick=function(){ sfSetAll('suited',false); sfSetAll('offsuit',false); sfSetAll('pair',false); };
+    globalRow.appendChild(gab); globalRow.appendChild(gnb);
+    body.appendChild(globalRow);
 
     makeSection('Suited',  'suited',  SUITED_SUITS,  4);
     makeSection('Offsuit', 'offsuit', OFFSUIT_SUITS, 3);
@@ -1810,7 +1889,7 @@ var RP = (function() {
     colorChart(pid, false);
     updateRangeSum(pid);
 
-    addLog(G.cfg.names[pid]+' ('+G.street+'): '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), true);
+    addLog(G.cfg.names[pid]+' ('+G.street+'): '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), 'log-'+action);
     setMsg(G.cfg.names[pid]+' → '+action+(action==='bet'||action==='raise'?' '+fmt(betSz):''));
 
     execAction(pid, action, betSz);
@@ -1921,18 +2000,21 @@ var RP = (function() {
     else { G.stacks[0]+=pot/2; G.stacks[1]+=pot/2; }
     G.pot=0; G.handOver=true;
     updateUI();
-    addLog('SHOWDOWN: '+G.cfg.names[0]+': '+h0.desc+' | '+G.cfg.names[1]+': '+h1.desc+' → '+title, true);
+    addLog('SHOWDOWN: '+G.cfg.names[0]+': '+h0.desc+' | '+G.cfg.names[1]+': '+h1.desc+' → '+title, 'log-result');
 
     // Show overlay
     $('sd-title').textContent=title;
-    $('sd-h0').textContent=G.cfg.names[0]+': '+h0.desc;
-    $('sd-h1').textContent=G.cfg.names[1]+': '+h1.desc;
-    // Cards
+    $('sd-pname0').textContent=G.cfg.names[0];
+    $('sd-pname1').textContent=G.cfg.names[1];
+    $('sd-h0').textContent=h0.desc;
+    $('sd-h1').textContent=h1.desc;
     var c0=$('sd-c0'); c0.innerHTML='';
     var c1=$('sd-c1'); c1.innerHTML='';
     G.hole[0].forEach(function(c){ c0.appendChild(makeCard(c,false)); });
     G.hole[1].forEach(function(c){ c1.appendChild(makeCard(c,false)); });
     $('sd-pot').textContent=winner>=0?G.cfg.names[winner]+' wins '+fmt(pot):'Split '+fmt(pot);
+    $('sd-p0').className='sd-player'+(winner===0?' sd-winner':winner===1?' sd-loser':'');
+    $('sd-p1').className='sd-player'+(winner===1?' sd-winner':winner===0?' sd-loser':'');
     $('showdown-overlay').classList.add('show');
   }
 
@@ -1961,7 +2043,7 @@ var RP = (function() {
     G.handOver=true;
     updateUI();
     renderHole(0,true); renderHole(1,true);
-    addLog(G.cfg.names[winnerPid]+' wins '+fmt(pot)+' (opponent folded)', true);
+    addLog(G.cfg.names[winnerPid]+' wins '+fmt(pot)+' (opponent folded)', 'log-result');
     setMsg(G.cfg.names[winnerPid]+' wins the pot — opponent folded');
     $('next-btn').textContent=G.stacks[0]>0&&G.stacks[1]>0?'Next Hand':'Play Again';
     $('next-btn').onclick=G.stacks[0]>0&&G.stacks[1]>0?nextHand:function(){ newMatch(G.cfg); };
