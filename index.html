@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Range Poker - Heads Up NLHE</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -577,6 +579,74 @@ body {
   cursor: pointer;
 }
 .btn-continue:hover { filter: brightness(1.1); }
+
+/* ===== ONLINE LOBBY ===== */
+.mode-tabs {
+  display: flex;
+  background: #0f1f10;
+  border: 1px solid #1a3a22;
+  border-radius: 8px;
+  padding: 3px;
+  width: 360px;
+  gap: 0;
+}
+.mode-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: #666;
+  padding: 8px 0;
+  font-size: 0.9em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mode-tab.active { background: #1a3a22; color: #ccc; }
+.mode-tab:hover:not(.active) { color: #999; }
+.online-sub-tabs { display: flex; margin-bottom: 14px; }
+.online-sub-tab {
+  flex: 1;
+  background: #0f2a15;
+  border: 1px solid #1a4a22;
+  color: #555;
+  padding: 6px 0;
+  font-size: 0.82em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.online-sub-tab:first-child { border-radius: 4px 0 0 4px; border-right: none; }
+.online-sub-tab:last-child  { border-radius: 0 4px 4px 0; }
+.online-sub-tab.active { background: #1a4a22; color: #ccc; }
+.room-code-display {
+  font-size: 2.6em;
+  font-weight: 800;
+  letter-spacing: 10px;
+  color: #f0c040;
+  text-align: center;
+  text-shadow: 0 0 20px rgba(240,192,64,0.3);
+  margin: 10px 0 4px;
+  padding-left: 10px;
+}
+.share-url-row {
+  font-size: 0.65em;
+  color: #555;
+  text-align: center;
+  word-break: break-all;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #0a150a;
+  margin-top: 4px;
+}
+.share-url-row:hover { color: #888; }
+.online-status {
+  font-size: 0.75em;
+  color: #7fc494;
+  text-align: center;
+  min-height: 20px;
+  margin-top: 6px;
+}
 </style>
 </head>
 <body>
@@ -585,7 +655,14 @@ body {
 <div id="setup-screen">
   <h1>♠ Range Poker ♥</h1>
   <p style="color:#666;font-size:0.85em;">Heads-Up No-Limit Texas Hold'em</p>
-  <div class="setup-card">
+
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tab-local" onclick="RP.setSetupMode('local')">Local</button>
+    <button class="mode-tab" id="tab-online" onclick="RP.setSetupMode('online')">Online</button>
+  </div>
+
+  <!-- Local game card -->
+  <div class="setup-card" id="local-card">
     <div class="setup-row">
       <label>Starting Stack (bb)</label>
       <input type="number" id="cfg-stack" value="100" min="10" max="1000" step="10">
@@ -603,6 +680,52 @@ body {
       <input type="text" id="cfg-p2" value="Player 2" style="text-align:left;">
     </div>
     <button class="btn-start" onclick="RP.startGame()">Start Game</button>
+  </div>
+
+  <!-- Online game card -->
+  <div class="setup-card" id="online-card" style="display:none">
+    <div class="online-sub-tabs">
+      <button class="online-sub-tab active" id="otab-host" onclick="RP.setOnlineSubMode('host')">Host Game</button>
+      <button class="online-sub-tab" id="otab-join" onclick="RP.setOnlineSubMode('join')">Join Game</button>
+    </div>
+
+    <!-- Host section -->
+    <div id="online-host-section">
+      <div class="setup-row">
+        <label>Your Name</label>
+        <input type="text" id="cfg-host-name" value="Player 1" style="text-align:left;">
+      </div>
+      <div class="setup-row">
+        <label>Starting Stack (bb)</label>
+        <input type="number" id="cfg-online-stack" value="100" min="10" max="1000" step="10">
+      </div>
+      <div class="setup-row">
+        <label>Time per Turn (sec)</label>
+        <input type="number" id="cfg-online-time" value="120" min="5" max="300" step="5">
+      </div>
+      <button class="btn-start" id="btn-create-room" onclick="RP.hostGame()">Create Room</button>
+      <div id="host-waiting" style="display:none">
+        <div class="room-code-display" id="room-code-text"></div>
+        <div class="online-status">Share this code (or link) with your opponent</div>
+        <div class="share-url-row" id="host-share-url" onclick="RP.copyShareUrl()"></div>
+        <div class="online-status" style="color:#555;margin-top:6px">Waiting for opponent to join…</div>
+      </div>
+    </div>
+
+    <!-- Join section -->
+    <div id="online-join-section" style="display:none">
+      <div class="setup-row">
+        <label>Room Code</label>
+        <input type="text" id="cfg-room-code" value="" placeholder="ABC123" maxlength="6"
+          style="text-align:center;text-transform:uppercase;letter-spacing:4px;font-size:1.1em;font-weight:700;">
+      </div>
+      <div class="setup-row">
+        <label>Your Name</label>
+        <input type="text" id="cfg-join-name" value="Player 2" style="text-align:left;">
+      </div>
+      <button class="btn-start" onclick="RP.joinGame()">Join Game</button>
+      <div class="online-status" id="join-status"></div>
+    </div>
   </div>
 </div>
 
@@ -753,10 +876,45 @@ body {
 
 <script>
 // ============================================================
+//  FIREBASE CONFIG
+//  1. Go to console.firebase.google.com → create a project
+//  2. Add a Realtime Database (start in test mode)
+//  3. Replace the placeholder values below with your project's
+//     config (Project Settings → Your apps → SDK setup)
+// ============================================================
+var FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyABvjVHBL8jxwUfQZdWX13MmHlOaweoc5s",
+  authDomain:        "range-poker-e74ab.firebaseapp.com",
+  databaseURL:       "https://range-poker-e74ab-default-rtdb.firebaseio.com",
+  projectId:         "range-poker-e74ab",
+  storageBucket:     "range-poker-e74ab.firebasestorage.app",
+  messagingSenderId: "287872989028",
+  appId:             "1:287872989028:web:a3a57ceb905c808c866c71"
+};
+
+var _fbDb = null;
+try {
+  if (FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    _fbDb = firebase.database();
+  }
+} catch(e) { console.warn('Firebase init failed:', e); }
+
+// ============================================================
 //  RANGE POKER — single-file vanilla JS
 // ============================================================
 var RP = (function() {
   'use strict';
+
+  // ---- Online mode state ----
+  var db         = _fbDb;   // Firebase database reference (null if not configured)
+  var onlineMode = false;   // true when playing an online game
+  var myPid      = -1;      // which player I am in this browser (0 or 1)
+  var roomCode   = null;    // 6-char room code
+  var currentHandN   = 0;  // hand sequence number, used to ignore stale actions
+  var handSeqNum     = 0;  // incremented by host when writing each new hand
+  var actionSeqNum   = 0;  // incremented by the active player on each submit
+  var actionSeqSeen  = 0;  // last action n processed from Firebase
 
   // ---- Constants ----
   var RANKS = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
@@ -1067,18 +1225,26 @@ var RP = (function() {
 
   // ---- Deal ----
   function dealHand() {
+    if (onlineMode && myPid === 1) {
+      // Guest: host will write the hand to Firebase; wait for the listener to fire
+      setMsg('Waiting for host to deal…');
+      return;
+    }
     G.deck = shuffle(buildDeck());
     G.hole[0] = [G.deck.pop(), G.deck.pop()];
     G.hole[1] = [G.deck.pop(), G.deck.pop()];
+    if (onlineMode) writeHandToFirebase();
+    startHandUI();
+  }
+
+  function startHandUI() {
     G.board = [];
     renderHole(0, debugMode);
     renderHole(1, debugMode);
     renderBoard();
     $('log').innerHTML='';
     updateUI();
-    // Post blinds then start
     postBlinds();
-    // Initialize both ranges now so the waiting player shows 1326 combos immediately
     G.narrowed=[null,null];
     initRange(0); initRange(1);
     startStreet('preflop');
@@ -1159,7 +1325,6 @@ var RP = (function() {
     suitFilter.offsuit=new Set(OFFSUIT_SUITS);
     suitFilter.pair=new Set(PAIR_SUITS);
     refreshSuitFilterBtns();
-    // Init range
     initRange(pid);
     G.draft[pid]=null;
     G.draftBetSz[pid]=null;
@@ -1173,14 +1338,20 @@ var RP = (function() {
     updateBarToggle();
     updateRangeDist(pid);
     updateSlotsDisabled();
-    renderChartListeners(pid);
 
     $('wait'+pid).textContent='';
     $('wait'+(1-pid)).textContent='Waiting...';
 
+    if (onlineMode && pid !== myPid) {
+      hideActionPanel();
+      setMsg('Waiting for '+G.cfg.names[pid]+'…');
+      startTimer(pid, function(){}); // display only — submit fires on the active player's browser
+      return;
+    }
+
+    renderChartListeners(pid);
     showActionPanel(pid);
     setMsg(G.cfg.names[pid]+': assign hand ranges, then submit');
-
     startTimer(pid, function(){ submit(true); });
   }
 
@@ -2072,6 +2243,8 @@ var RP = (function() {
     addLog(G.cfg.names[pid]+' ('+G.street+'): '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), 'log-'+action);
     setMsg(G.cfg.names[pid]+' → '+action+(action==='bet'||action==='raise'?' '+fmt(betSz):''));
 
+    if (onlineMode) writeActionToFirebase(pid, action, betSz, narrowedSet);
+
     execAction(pid, action, betSz);
   }
 
@@ -2201,6 +2374,10 @@ var RP = (function() {
 
   function closeShowdown() {
     $('showdown-overlay').classList.remove('show');
+    if (onlineMode && myPid !== 0) {
+      setMsg('Waiting for host to start next hand…');
+      return;
+    }
     if (G.stacks[0]<=0||G.stacks[1]<=0) {
       var wi=G.stacks[0]>0?0:1;
       setMsg(G.cfg.names[wi]+' wins the match!');
@@ -2226,6 +2403,10 @@ var RP = (function() {
     renderHole(0,true); renderHole(1,true);
     addLog(G.cfg.names[winnerPid]+' wins '+fmt(pot)+' (opponent folded)', 'log-result');
     setMsg(G.cfg.names[winnerPid]+' wins the pot — opponent folded');
+    if (onlineMode && myPid !== 0) {
+      setMsg(G.cfg.names[winnerPid]+' wins — waiting for host to start next hand…');
+      return;
+    }
     $('next-btn').textContent=G.stacks[0]>0&&G.stacks[1]>0?'Next Hand':'Play Again';
     $('next-btn').onclick=G.stacks[0]>0&&G.stacks[1]>0?nextHand:function(){ newMatch(G.cfg); };
     $('next-btn').style.display='block';
@@ -2387,6 +2568,204 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     setMsg('Slot '+(i+1)+' loaded.');
   }
 
+  // ================================================================
+  //  ONLINE MULTIPLAYER
+  // ================================================================
+
+  function generateRoomCode() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+    var code = '';
+    for (var i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
+  // ---- Lobby UI helpers ----
+  function setSetupMode(mode) {
+    $('local-card').style.display  = mode === 'local'  ? '' : 'none';
+    $('online-card').style.display = mode === 'online' ? '' : 'none';
+    $('tab-local').classList.toggle('active',  mode === 'local');
+    $('tab-online').classList.toggle('active', mode === 'online');
+  }
+
+  function setOnlineSubMode(mode) {
+    $('online-host-section').style.display = mode === 'host' ? '' : 'none';
+    $('online-join-section').style.display = mode === 'join' ? '' : 'none';
+    $('otab-host').classList.toggle('active', mode === 'host');
+    $('otab-join').classList.toggle('active', mode === 'join');
+  }
+
+  // ---- Host a game ----
+  function hostGame() {
+    if (!db) { alert('Firebase is not configured.\nFill in FIREBASE_CONFIG in the source first.'); return; }
+    var hostName   = $('cfg-host-name').value   || 'Player 1';
+    var startStack = parseFloat($('cfg-online-stack').value) || 100;
+    var timeLimit  = parseInt($('cfg-online-time').value)    || 120;
+
+    roomCode  = generateRoomCode();
+    myPid     = 0;
+    onlineMode = true;
+
+    db.ref('rooms/'+roomCode).set({
+      status: 'waiting',
+      config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit }
+    });
+
+    // Show room code and share link
+    $('room-code-text').textContent = roomCode;
+    $('btn-create-room').disabled = true;
+    $('host-waiting').style.display = '';
+    var shareUrl = window.location.href.split('?')[0] + '?room=' + roomCode;
+    $('host-share-url').textContent = '🔗 ' + shareUrl + '  (click to copy)';
+
+    // Wait for guest to join
+    db.ref('rooms/'+roomCode+'/players/1').on('value', function(snap) {
+      var guest = snap.val();
+      if (!guest) return;
+      // Guest has joined — start the game
+      setupActionListener();
+      $('setup-screen').style.display = 'none';
+      $('game-screen').style.display  = 'flex';
+      newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name] });
+    });
+  }
+
+  // ---- Join a game ----
+  function joinGame() {
+    if (!db) { alert('Firebase is not configured.\nFill in FIREBASE_CONFIG in the source first.'); return; }
+    var code      = ($('cfg-room-code').value || '').toUpperCase().replace(/\s/g,'');
+    var guestName = $('cfg-join-name').value || 'Player 2';
+
+    if (code.length !== 6) { $('join-status').textContent = 'Enter the 6-character room code.'; return; }
+    $('join-status').textContent = 'Connecting…';
+
+    db.ref('rooms/'+code+'/config').once('value', function(snap) {
+      var cfg = snap.val();
+      if (!cfg) { $('join-status').textContent = 'Room not found — check the code and try again.'; return; }
+
+      roomCode   = code;
+      myPid      = 1;
+      onlineMode = true;
+
+      // Register as guest
+      db.ref('rooms/'+roomCode+'/players/1').set({ name: guestName });
+
+      // Set up listeners before showing game screen
+      setupHandListener();
+      setupActionListener();
+
+      $('setup-screen').style.display = 'none';
+      $('game-screen').style.display  = 'flex';
+      // newMatch creates G and calls dealHand(), which returns early for the guest
+      newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName] });
+    });
+  }
+
+  // ---- Firebase listeners ----
+  function setupHandListener() {
+    db.ref('rooms/'+roomCode+'/hand').on('value', function(snap) {
+      var data = snap.val();
+      if (!data || data.n === currentHandN) return;
+      currentHandN  = data.n;
+      actionSeqSeen = 0;
+      onRemoteHand(data);
+    });
+  }
+
+  function setupActionListener() {
+    db.ref('rooms/'+roomCode+'/pendingAction').on('value', function(snap) {
+      var data = snap.val();
+      if (!data) return;
+      if (data.handN !== currentHandN) return; // stale action from a previous hand
+      if (data.n === actionSeqSeen) return;     // already processed
+      actionSeqSeen = data.n;
+      if (data.pid === myPid) return;           // my own action, already executed locally
+      onRemoteAction(data);
+    });
+  }
+
+  // ---- Apply hand state received from host ----
+  function onRemoteHand(data) {
+    G.deck         = data.deck;
+    G.hole         = [data.hole0, data.hole1];
+    G.dealer       = data.dealer;
+    G.stacks       = [data.stacks0, data.stacks1];
+    G.handNum      = data.n;
+    G.handOver     = false;
+    G.allIn        = false;
+    G.bets         = [0, 0];
+    G.pot          = 0;
+    G.curBetTo     = 0;
+    G.lastRaiseAmt = 0;
+    G.narrowed     = [null, null];
+    G.draft        = [null, null];
+    G.draftBetSz   = [null, null];
+    G.pendingAction = null;
+
+    $('next-btn').style.display = 'none';
+    buildChart(0); buildChart(1);
+    startHandUI();
+  }
+
+  // ---- Apply action received from opponent ----
+  function onRemoteAction(data) {
+    var pid = data.pid;
+    G.narrowed[pid] = data.narrowed === null ? null : new Set(data.narrowed);
+    colorChart(pid, false);
+    updateRangeSum(pid);
+    var sfx = data.betSz && (data.action==='bet'||data.action==='raise') ? ' '+fmt(data.betSz) : '';
+    addLog(G.cfg.names[pid]+' ('+G.street+'): '+data.action+sfx, 'log-'+data.action);
+    setMsg(G.cfg.names[pid]+' → '+data.action+sfx);
+    // Delay before advancing game state so the browser renders the action
+    // (narrowed range + log message) before potentially starting the same
+    // player's next turn on a new street.
+    setTimeout(function() {
+      execAction(pid, data.action, data.betSz || 0);
+    }, 350);
+  }
+
+  // ---- Write hand state to Firebase (host only) ----
+  function writeHandToFirebase() {
+    handSeqNum++;
+    currentHandN  = handSeqNum;
+    actionSeqNum  = 0;
+    actionSeqSeen = 0;
+    db.ref('rooms/'+roomCode+'/hand').set({
+      n:       handSeqNum,
+      dealer:  G.dealer,
+      deck:    G.deck,
+      hole0:   G.hole[0],
+      hole1:   G.hole[1],
+      stacks0: G.stacks[0],
+      stacks1: G.stacks[1]
+    });
+  }
+
+  // ---- Write action to Firebase (active player) ----
+  function writeActionToFirebase(pid, action, betSz, narrowed) {
+    actionSeqNum++;
+    db.ref('rooms/'+roomCode+'/pendingAction').set({
+      handN:    currentHandN,
+      n:        actionSeqNum,
+      pid:      pid,
+      action:   action,
+      betSz:    betSz || 0,
+      narrowed: narrowed === null ? null : Array.from(narrowed)
+    });
+  }
+
+  // ---- Copy share URL to clipboard ----
+  function copyShareUrl() {
+    var url = window.location.href.split('?')[0] + '?room=' + roomCode;
+    navigator.clipboard.writeText(url).then(function() {
+      $('host-share-url').textContent = '✓ Copied to clipboard!';
+      setTimeout(function() {
+        $('host-share-url').textContent = '🔗 ' + url + '  (click to copy)';
+      }, 2500);
+    });
+  }
+
+  // ================================================================
+
   return {
     startGame: startGame,
     openSettings: openSettings,
@@ -2405,7 +2784,12 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     _buildSuitFilter: buildSuitFilterUI,
     _buildRangeSlots: buildRangeSlots,
     saveRange: saveRange,
-    loadRange: loadRange
+    loadRange: loadRange,
+    setSetupMode: setSetupMode,
+    setOnlineSubMode: setOnlineSubMode,
+    hostGame: hostGame,
+    joinGame: joinGame,
+    copyShareUrl: copyShareUrl
   };
 })();
 
@@ -2422,6 +2806,15 @@ document.addEventListener('DOMContentLoaded', function(){
     if (min && val < min) this.value = min.toFixed(1);
     else if (max && val > max) this.value = max.toFixed(1);
   });
+
+  // If URL contains ?room=CODE, switch straight to the join screen
+  var urlParams = new URLSearchParams(window.location.search);
+  var roomParam = urlParams.get('room');
+  if (roomParam) {
+    RP.setSetupMode('online');
+    RP.setOnlineSubMode('join');
+    document.getElementById('cfg-room-code').value = roomParam.toUpperCase();
+  }
 });
 </script>
 </body>
