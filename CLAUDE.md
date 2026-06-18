@@ -37,9 +37,10 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 - `htSuitKey(r, c, suit)` maps a grid cell + suit-pair string (e.g. `"sh"`) to a canonical 4-char combo key
 - `cKey(c1, c2)` produces a canonical combo key (cards sorted by rank-index×4+suit-index)
 - `combosFor(ht)` enumerates all raw combos for a hand-type string like `"AKs"` or `"72o"`
+- `comboToRC(ck)` maps a 4-char combo key back to `{r, c}` grid coordinates
 
 **Turn flow**
-1. `startTurn(pid)` → `initRange(pid)` (builds/rebuilds ranges respecting `narrowed`) → `showActionPanel(pid)`
+1. `startTurn(pid)` → `buildComboStrengthIndex()` → `initRange(pid)` (builds/rebuilds ranges respecting `narrowed`) → `showActionPanel(pid)`
 2. Player drag-selects cells on their chart; action buttons assign the chosen action to `drag.cells`
 3. `submit()` → `execAction()` → updates `G.narrowed[pid]` from submitted ranges → `checkAdvance(pid)` → next turn or next street
 
@@ -51,17 +52,21 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 
 **Range narrowing** — after a player submits, `G.narrowed[pid]` is set to the union of all combo keys that got assigned to the action they actually took. `initRange` checks this set on subsequent turns so grayed-out (eliminated) combos are excluded from the map entirely.
 
-**Drag selection** — `drag.cells` is a `Set<"r,c">` of selected chart cells. Selecting adds/removes from this set; action button click calls `assignSelection(pid, action)` which applies the suit filter and clears `drag.cells`. Category buttons (`selectCategory`) add to `drag.cells` rather than directly assigning.
+**Drag selection** — `drag.cells` is a `Set<"r,c">` of selected chart cells. Selecting adds/removes from this set; action button click calls `assignSelection(pid, action)` which applies the suit filter and clears `drag.cells`. Category buttons (`selectCategory`) add to `drag.cells` rather than directly assigning. Default selection mode is freehand (`selMode = 'free'`).
 
-**Hand evaluator** — `evalHand(cards)` picks best 5 from 7 (or 6) cards via `eval5`. Rank thresholds: SF≥8e8, Quads≥7e8, FH≥6e8, Flush≥5e8, Straight≥4e8, Trips≥3e8, TwoPair≥2e8, Pair≥1e8.
+**Hand evaluator** — `evalHand(cards)` picks best 5 from 7 (or 6) cards via `eval5`. Rank thresholds: SF≥8e8, Quads≥7e8, FH≥6e8, Flush≥5e8, Straight≥4e8, Trips≥3e8, TwoPair≥2e8, Pair≥1e8. Tiebreakers are packed into the lower digits (base-15 positional for flush/high-card; rank×multiplier for made hands).
 
 **Hand type categories** — `boardAnalysis(board)` computes rank/suit counts. `getHandCategories(pid, board)` returns visible category buttons with combo counts; straight/flush draws are suppressed on the river and when not structurally possible on the board. OESD vs gutshot: missing rank at the low end of a window is only OESD if `lo+4 < 14` (Ace not at top); missing at high end only OESD if `lo > 1` (Ace-low not at bottom). A **"Nothing"** category is always included last for combos matching no other category; on the river the 'nothing' check in `matchesCategory` omits flush/straight draw tests so missed draws are correctly classified as nothing.
+
+**`isPairAtRank` on paired boards** — On an unpaired board, `isPairAtRank` requires the other hole card to not hit the board (prevents double-counting with `isTwoPair`). On paired boards, `isTwoPair` is disabled, so `isPairAtRank` relaxes this: when both hole cards each pair a different *unpaired* board rank (counterfeit two pair), only the higher-ranked hole card's pair is counted. If the other hole card hits a *paired* board rank (would make a full house), it still returns false.
 
 **Check display** — `execAction` sets `bdisp[pid].textContent = 'Check'` for postflop checks; `updateUI()` (called by `collectBets()` on street advance) clears it automatically when `G.bets[p] === 0`.
 
 **Timer bar** — the gradient (`red → orange → green`) is painted on the `.timer-bar` background and stays fixed-width (`calc(13 * 37px + 16px)` = chart width). `.timer-fill` is a dark overlay anchored to the right edge that grows from 0% → 100% as time expires, revealing progressively less of the gradient. `.timer-text` is absolutely positioned to the left of the bar so it doesn't affect the bar's centering.
 
 **Preflop range slots** — `updateSlotsDisabled()` applies three CSS states to each `.range-slots` panel: `pf-disabled` (not preflop), fully active (active player's panel), or `opp-view` (opponent's panel — load enabled, save/name-edit disabled). `loadRange(pid, i)` always loads into `G.actPid`'s chart regardless of which slot panel `pid` the data came from, remapping actions via `remapAction(action, isFacing(dest))`.
+
+**Strength bar** — `buildComboStrengthIndex()` (called at the start of each turn) enumerates all valid combos (excluding board cards), evaluates each with `evalHand([c1,c2,...board])`, sorts by score, and groups equal scores into `comboStrengthGroups`. `renderStrengthBars()` displays two stacked bars (one per player) showing how each player's range is distributed across hand strengths on the current board. The active player's bar colors combos by assigned action; the opponent's bar shows which combos are in their narrowed range. Hidden preflop (no board = no scores). The action panel has a toggle (`barView`) between this view and the action-frequency bar (`#range-dist-bar` + `#range-dist`); both share the same text label above them.
 
 ## Layout
 
@@ -74,6 +79,8 @@ Each `.player-panel` (flex column, `align-items: center`) contains from top:
 4. `.hand-chart` — the 13×13 grid (37px × 47px cells)
 5. `.range-sum` — combo count
 
+The center column (`#center-col`) contains from top: `#board-section` (community cards + pot), `#action-panel` (hidden when not a player's turn). The action panel contains in order: prompt text, sel-mode buttons (Freehand | Rectangle | Select All), action frequency text (`#range-dist`), bar toggle row, action frequency bar (`#range-dist-bar`) / strength bars (`#strength-bar-wrap`), action buttons, bet size row, presets, suit filter, hand types, submit row.
+
 ## Key invariants
 
 - Opponent hole cards are **never** excluded from `initRange` (would leak info and reduce 1326→1225)
@@ -81,3 +88,4 @@ Each `.player-panel` (flex column, `align-items: center`) contains from top:
 - Suit filter (`suitFilter`) affects drag assignment and category selection but not category combo counts (counts scan all suits)
 - `drag.cells` is cleared by `deselectAll()` which is called at the top of `submit()` and on the "Deselect All" button
 - Chart-width-dependent CSS values use `calc(13 * 37px + 16px)` — update when cell size changes
+- `comboStrengthGroups` is `null` preflop; the strength bar toggle button is disabled and `barView` resets to `'freq'` automatically when no groups are available
