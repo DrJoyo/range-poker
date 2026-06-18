@@ -241,6 +241,9 @@ body {
 .sf-btn { background:#0f3a1a; border:1px solid #1a5c2e; border-radius:2px; font-size:0.68em; padding:2px 1px; cursor:pointer; text-align:center; line-height:1.2; }
 .sf-btn.off { background:#0a0f0a; border-color:#111; opacity:0.35; }
 .sf-btn:hover { filter:brightness(1.3); }
+.sf-suit-row { display:flex; gap:2px; justify-content:center; margin-bottom:1px; }
+.sf-suit-add-btn { background:#1a3a22; border:1px solid #2a5a3a; border-radius:2px; font-size:0.85em; padding:1px 7px; cursor:pointer; line-height:1.3; }
+.sf-suit-add-btn:hover { filter:brightness(1.4); }
 
 /* Range summary */
 .range-sum {
@@ -1732,6 +1735,18 @@ var RP = (function() {
       bwrap.appendChild(ab); bwrap.appendChild(nb);
       hdr.appendChild(lbl); hdr.appendChild(bwrap);
       sec.appendChild(hdr);
+      if (type==='offsuit'||type==='pair') {
+        var suitRow=document.createElement('div');
+        suitRow.className='sf-suit-row';
+        for (var s of SUITS) {
+          var sb=document.createElement('button');
+          sb.className='sf-suit-add-btn';
+          sb.innerHTML='<span style="color:'+SCLR[s]+'">'+SYM[s]+'</span>';
+          (function(t,sc){ sb.addEventListener('click',function(){ sfAddSuit(t,sc); }); })(type,s);
+          suitRow.appendChild(sb);
+        }
+        sec.appendChild(suitRow);
+      }
       var grid=document.createElement('div');
       grid.className='sf-grid';
       grid.style.gridTemplateColumns='repeat('+cols+',1fr)';
@@ -1764,6 +1779,17 @@ var RP = (function() {
   function sfToggle(type, suit, btn) {
     if (suitFilter[type].has(suit)) { suitFilter[type].delete(suit); btn.classList.add('off'); }
     else { suitFilter[type].add(suit); btn.classList.remove('off'); }
+    if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
+  }
+
+  function sfAddSuit(type, suitChar) {
+    var all = typeSuits(type);
+    var matching = new Set(all.filter(function(s){ return s[0]===suitChar||s[1]===suitChar; }));
+    for (var suit of all) {
+      if (matching.has(suit)) { suitFilter[type].add(suit); } else { suitFilter[type].delete(suit); }
+      var btn=$('sf-'+type+'-'+suit);
+      if (btn) btn.classList.toggle('off', !matching.has(suit));
+    }
     if (G && G.actPid>=0 && !G.handOver) colorChart(G.actPid, true);
   }
 

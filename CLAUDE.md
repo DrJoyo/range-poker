@@ -81,6 +81,25 @@ Each `.player-panel` (flex column, `align-items: center`) contains from top:
 
 The center column (`#center-col`) contains from top: `#board-section` (community cards + pot), `#action-panel` (hidden when not a player's turn). The action panel contains in order: prompt text, sel-mode buttons (Freehand | Rectangle | Select All), action frequency text (`#range-dist`), bar toggle row, action frequency bar (`#range-dist-bar`) / strength bars (`#strength-bar-wrap`), action buttons, bet size row, presets, suit filter, hand types, submit row.
 
+## Online multiplayer (Firebase)
+
+Firebase Realtime Database is used for peer-to-peer synchronization. The host (pid 0) owns all authoritative game state; the guest (pid 1) is a receiver who only writes their own actions.
+
+**Setup flow**
+- Host: `hostGame()` → writes room config to `rooms/<code>`, listens on `rooms/<code>/players/1` for guest join → calls `newMatch()` and `writeHandToFirebase()`
+- Guest: `joinGame()` → reads room config, writes `rooms/<code>/players/1`, calls `setupHandListener()` + `setupActionListener()`, then `newMatch()` (which returns early in `dealHand()` since `myPid === 1`)
+- `?room=CODE` in the URL auto-fills the join screen and switches to the online tab
+
+**Firebase data paths**
+- `rooms/<code>/hand` — host writes full hand state (deck, hole cards, stacks, dealer, sequence number `n`); guest listens via `setupHandListener()` → `onRemoteHand()`
+- `rooms/<code>/pendingAction` — whoever just acted writes their action; the other player listens via `setupActionListener()` → `onRemoteAction()`. A single node (not an array): overwritten each action, deduplicated by `handN + n + pid`
+
+**Deduplication** — `actionSeenKey` (`"pid:n"`) and `currentHandN` prevent replaying own actions or stale actions from a previous hand.
+
+**Draft & timer fallback** — `G.draft[pid]` / `G.draftBetSz[pid]` store a snapshot saved by `saveDraft()`. When the timer expires (`fromTimer=true`), `submit()` uses the draft ranges instead of the live ones so a player's last manual save is submitted rather than an empty range.
+
+**Key online-mode guards** — `if (onlineMode && myPid === 1)` in `dealHand()` (guest skips local deal); `if (onlineMode && pid !== myPid)` in `startTurn()` (opponent's turn shows waiting message); `if (onlineMode && myPid !== 0)` in `nextHand()` / `closeShowdown()` (only host advances the hand).
+
 ## Key invariants
 
 - Opponent hole cards are **never** excluded from `initRange` (would leak info and reduce 1326→1225)
@@ -89,3 +108,4 @@ The center column (`#center-col`) contains from top: `#board-section` (community
 - `drag.cells` is cleared by `deselectAll()` which is called at the top of `submit()` and on the "Deselect All" button
 - Chart-width-dependent CSS values use `calc(13 * 37px + 16px)` — update when cell size changes
 - `comboStrengthGroups` is `null` preflop; the strength bar toggle button is disabled and `barView` resets to `'freq'` automatically when no groups are available
+- Suit filter "contains suit" buttons (♠♥♦♣, in Offsuit and Pairs sections) call `sfAddSuit(type, suitChar)` which **replaces** the current filter with exactly the combos containing that suit — they do not toggle or accumulate
