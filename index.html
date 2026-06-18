@@ -914,7 +914,7 @@ var RP = (function() {
   var currentHandN   = 0;  // hand sequence number, used to ignore stale actions
   var handSeqNum     = 0;  // incremented by host when writing each new hand
   var actionSeqNum   = 0;  // incremented by the active player on each submit
-  var actionSeqSeen  = 0;  // last action n processed from Firebase
+  var actionSeenKey  = ''; // "pid:n" of the last action processed from Firebase
 
   // ---- Constants ----
   var RANKS = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
@@ -2666,7 +2666,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       var data = snap.val();
       if (!data || data.n === currentHandN) return;
       currentHandN  = data.n;
-      actionSeqSeen = 0;
+      actionSeenKey = '';
       onRemoteHand(data);
     });
   }
@@ -2676,8 +2676,9 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       var data = snap.val();
       if (!data) return;
       if (data.handN !== currentHandN) return; // stale action from a previous hand
-      if (data.n === actionSeqSeen) return;     // already processed
-      actionSeqSeen = data.n;
+      var actionKey = data.pid + ':' + data.n;
+      if (actionKey === actionSeenKey) return;  // already processed
+      actionSeenKey = actionKey;
       if (data.pid === myPid) return;           // my own action, already executed locally
       onRemoteAction(data);
     });
@@ -2728,7 +2729,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     handSeqNum++;
     currentHandN  = handSeqNum;
     actionSeqNum  = 0;
-    actionSeqSeen = 0;
+    actionSeenKey = '';
     db.ref('rooms/'+roomCode+'/hand').set({
       n:       handSeqNum,
       dealer:  G.dealer,
