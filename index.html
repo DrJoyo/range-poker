@@ -72,6 +72,8 @@ body {
   margin-top: 4px;
 }
 .btn-start:hover { filter: brightness(1.1); }
+#btn-cancel-room { background:#3a1a1a; border:1px solid #7a3a3a; color:#e88; border-radius:6px; padding:6px 18px; font-size:0.85em; cursor:pointer; }
+#btn-cancel-room:hover { filter:brightness(1.2); }
 
 /* ===== GAME SCREEN ===== */
 #game-screen {
@@ -757,6 +759,7 @@ body {
 
     <!-- Host section -->
     <div id="online-host-section">
+      <div id="host-settings">
       <div class="setup-row">
         <label>Your Name</label>
         <input type="text" id="cfg-host-name" value="Player 1" style="text-align:left;">
@@ -773,8 +776,12 @@ body {
         <input type="checkbox" id="cfg-online-ev-split">
         <label for="cfg-online-ev-split">Range EV Split at Showdown</label>
       </div>
+      </div>
       <button class="btn-start" id="btn-create-room" onclick="RP.hostGame()">Create Room</button>
       <div id="host-waiting" style="display:none">
+        <div style="display:flex;justify-content:center;margin-bottom:8px;">
+          <button id="btn-cancel-room" onclick="RP.cancelRoom()">Cancel</button>
+        </div>
         <div class="room-code-display" id="room-code-text"></div>
         <div class="online-status">Share this code (or link) with your opponent</div>
         <div class="share-url-row" id="host-share-url" onclick="RP.copyShareUrl()"></div>
@@ -1011,6 +1018,7 @@ var RP = (function() {
   var onlineMode = false;   // true when playing an online game
   var myPid      = -1;      // which player I am in this browser (0 or 1)
   var roomCode   = null;    // 6-char room code
+  var _guestJoinRef = null; // Firebase ref for the host's guest-join listener
   var currentHandN   = 0;  // hand sequence number, used to ignore stale actions
   var handSeqNum     = 0;  // incremented by host when writing each new hand
   var actionSeqNum   = 0;  // incremented by the active player on each submit
@@ -1250,7 +1258,23 @@ var RP = (function() {
   }
 
   // ---- Init ----
+  function cancelOnlineSetup() {
+    if (_guestJoinRef) { _guestJoinRef.off(); _guestJoinRef = null; }
+    onlineMode = false;
+    myPid = -1;
+    roomCode = null;
+    $('host-settings').style.display = '';
+    $('btn-create-room').style.display = '';
+    $('host-waiting').style.display = 'none';
+  }
+
+  function cancelRoom() {
+    if (db && roomCode) db.ref('rooms/'+roomCode).remove();
+    cancelOnlineSetup();
+  }
+
   function startGame() {
+    cancelOnlineSetup();
     var cfg = {
       startStack: parseFloat($('cfg-stack').value)||100,
       timeLimit:  parseInt($('cfg-time').value)||20,
@@ -2343,7 +2367,7 @@ var RP = (function() {
   function hideActionPanel() {
     $('action-panel').classList.add('hidden');
     drag.cells=new Set();
-    if (onlineMode && comboStrengthGroups) {
+    if (comboStrengthGroups) {
       var wb=$('waiting-bars');
       wb.appendChild($('bar-toggle-row'));
       wb.appendChild($('strength-bar-wrap'));
@@ -2537,9 +2561,11 @@ var RP = (function() {
   }
 
   function submit(fromTimer) {
+    if ($('action-panel').classList.contains('hidden')) return;
     var pid=G.actPid;
     deselectAll();
     stopTimer();
+    hideActionPanel();
     var betSz = fromTimer && G.draftBetSz[pid] != null
       ? G.draftBetSz[pid]
       : parseFloat($('bet-inp').value) || 1;
@@ -2565,6 +2591,8 @@ var RP = (function() {
         if (m[k]===action) narrowedSet.add(k);
       }
     }
+    // Early-folded combos were stripped from ranges but belong in the fold range
+    if (action==='fold') earlyFolded[pid].forEach(function(k){ narrowedSet.add(k); });
     G.narrowed[pid]=narrowedSet;
 
     colorChart(pid, false);
@@ -2731,6 +2759,8 @@ var RP = (function() {
 
   // ---- Showdown ----
   function showdown() {
+    buildComboStrengthIndex();
+    hideActionPanel();
     renderHole(0,true); renderHole(1,true);
     var board=G.board;
     var h0=evalHand([...G.hole[0],...board]);
@@ -3132,15 +3162,20 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
 
     // Show room code and share link
     $('room-code-text').textContent = roomCode;
-    $('btn-create-room').disabled = true;
+    $('host-settings').style.display = 'none';
+    $('btn-create-room').style.display = 'none';
     $('host-waiting').style.display = '';
     var shareUrl = window.location.href.split('?')[0] + '?room=' + roomCode;
     $('host-share-url').textContent = '🔗 ' + shareUrl + '  (click to copy)';
 
     // Wait for guest to join
-    db.ref('rooms/'+roomCode+'/players/1').on('value', function(snap) {
+    _guestJoinRef = db.ref('rooms/'+roomCode+'/players/1');
+    _guestJoinRef.on('value', function(snap) {
       var guest = snap.val();
       if (!guest) return;
+      // Detach listener and mark room active so late joiners are rejected
+      _guestJoinRef.off(); _guestJoinRef = null;
+      db.ref('rooms/'+roomCode+'/status').set('active');
       // Guest has joined — start the game
       setupActionListener();
       $('setup-screen').style.display = 'none';
@@ -3158,9 +3193,11 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     if (code.length !== 6) { $('join-status').textContent = 'Enter the 6-character room code.'; return; }
     $('join-status').textContent = 'Connecting…';
 
-    db.ref('rooms/'+code+'/config').once('value', function(snap) {
-      var cfg = snap.val();
-      if (!cfg) { $('join-status').textContent = 'Room not found — check the code and try again.'; return; }
+    db.ref('rooms/'+code).once('value', function(snap) {
+      var room = snap.val();
+      if (!room || !room.config) { $('join-status').textContent = 'Room not found — check the code and try again.'; return; }
+      if (room.status === 'active') { $('join-status').textContent = 'Game already in progress.'; return; }
+      var cfg = room.config;
 
       roomCode   = code;
       myPid      = 1;
@@ -3312,6 +3349,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     toggleHT: toggleHT,
     toggleRandomize: toggleRandomize,
     randomizeRange: randomizeRange,
+    cancelRoom: cancelRoom,
     deselectAll: deselectAll,
     toggleSelectAll: toggleSelectAll,
     setSelMode: setSelMode,
