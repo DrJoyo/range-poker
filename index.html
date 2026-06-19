@@ -1025,6 +1025,12 @@ var RP = (function() {
   var actionSeenKey  = ''; // "pid:n" of the last action processed from Firebase
   var remoteActionQueue      = [];   // actions waiting to be executed in order
   var processingRemoteAction = false;
+  var serverTimeOffset  = 0;    // ms delta: Date.now() + serverTimeOffset ≈ Firebase server time
+  var turnSeqNum        = 0;    // incremented by host each startTurn
+  var _lastSyncedTurnId = 0;    // turnId of the last currentTurn we synced a timer to
+  var _pendingTimerPid    = -1;
+  var _pendingTimerOnDone = null;
+  var _lastTurnData       = null; // most recent currentTurn received from Firebase
   var earlyFolded = [new Set(), new Set()]; // combos stripped by foldEarly this turn, shown as ghost
 
   // ---- Constants ----
@@ -1263,6 +1269,7 @@ var RP = (function() {
     onlineMode = false;
     myPid = -1;
     roomCode = null;
+    turnSeqNum = 0; _lastSyncedTurnId = 0; _lastTurnData = null;
     $('host-settings').style.display = '';
     $('btn-create-room').style.display = '';
     $('host-waiting').style.display = 'none';
@@ -1447,6 +1454,12 @@ var RP = (function() {
   // ---- Turn ----
   function startTurn(pid) {
     G.actPid=pid;
+    if (onlineMode && myPid === 0) {
+      db.ref('rooms/'+roomCode+'/currentTurn').set({
+        pid: pid, turnId: ++turnSeqNum,
+        startedAt: firebase.database.ServerValue.TIMESTAMP
+      });
+    }
     suitFilter.suited=new Set(SUITED_SUITS);
     suitFilter.offsuit=new Set(OFFSUIT_SUITS);
     suitFilter.pair=new Set(PAIR_SUITS);
@@ -2888,28 +2901,54 @@ var RP = (function() {
   }
 
   // ---- Timer ----
-  function startTimer(pid, onDone) {
-    stopTimer();
-    G.timerLeft=G.cfg.timeLimit;
-    var fill=$('tfill'+pid);
-    var text=$('ttext'+pid);
-    var row=$('timer'+pid);
+  function _startTimerWithRemaining(pid, remaining, onDone) {
+    if (G.timerInt) { clearInterval(G.timerInt); G.timerInt=null; }
+    G.timerLeft = remaining;
+    var fill=$('tfill'+pid), text=$('ttext'+pid), row=$('timer'+pid);
     row.classList.add('active');
+    var pct = Math.max(0, G.timerLeft / G.cfg.timeLimit * 100);
     fill.style.transition='none';
-    fill.style.width='0%';
-
+    fill.style.width=(100-pct)+'%';
+    text.textContent=G.timerLeft+'s';
     G.timerInt=setInterval(function(){
       G.timerLeft--;
-      var pct=Math.max(0, G.timerLeft/G.cfg.timeLimit*100);
+      var p=Math.max(0, G.timerLeft/G.cfg.timeLimit*100);
       fill.style.transition='width 1s linear';
-      fill.style.width=(100-pct)+'%';
+      fill.style.width=(100-p)+'%';
       text.textContent=G.timerLeft+'s';
-if (G.timerLeft<=0) { stopTimer(); onDone(); }
+      if (G.timerLeft<=0) { stopTimer(); onDone(); }
     }, 1000);
+  }
+
+  function _maybeSyncTimer() {
+    if (!_lastTurnData || _pendingTimerPid < 0) return;
+    if (_lastTurnData.pid !== _pendingTimerPid) return;
+    if (_lastTurnData.turnId <= _lastSyncedTurnId) return; // stale, already used
+    _lastSyncedTurnId = _lastTurnData.turnId;
+    var elapsed = Math.max(0, (Date.now() + serverTimeOffset) - _lastTurnData.startedAt);
+    var remaining = Math.max(0, G.cfg.timeLimit - Math.floor(elapsed / 1000));
+    var pid = _pendingTimerPid, onDone = _pendingTimerOnDone;
+    _pendingTimerPid = -1; _pendingTimerOnDone = null;
+    _startTimerWithRemaining(pid, remaining, onDone);
+  }
+
+  function startTimer(pid, onDone) {
+    stopTimer();
+    if (onlineMode) {
+      var fill=$('tfill'+pid), text=$('ttext'+pid), row=$('timer'+pid);
+      row.classList.add('active');
+      fill.style.transition='none'; fill.style.width='0%';
+      text.textContent=G.cfg.timeLimit+'s';
+      _pendingTimerPid = pid; _pendingTimerOnDone = onDone;
+      _maybeSyncTimer(); // fires immediately if listener already received this turn
+      return;
+    }
+    _startTimerWithRemaining(pid, G.cfg.timeLimit, onDone);
   }
 
   function stopTimer() {
     if (G&&G.timerInt) { clearInterval(G.timerInt); G.timerInt=null; }
+    _pendingTimerPid=-1; _pendingTimerOnDone=null;
     for(var i=0;i<2;i++) $('timer'+i).classList.remove('active');
   }
 
@@ -3159,6 +3198,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       status: 'waiting',
       config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit, evSplit: evSplit }
     });
+    db.ref('rooms/'+roomCode).onDisconnect().remove();
 
     // Show room code and share link
     $('room-code-text').textContent = roomCode;
@@ -3178,6 +3218,10 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       db.ref('rooms/'+roomCode+'/status').set('active');
       // Guest has joined — start the game
       setupActionListener();
+      setupPresence();
+      setupPresenceListener(1);
+      setupServerTimeOffset();
+      setupTurnListener();
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
       newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit });
@@ -3196,8 +3240,30 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     db.ref('rooms/'+code).once('value', function(snap) {
       var room = snap.val();
       if (!room || !room.config) { $('join-status').textContent = 'Room not found — check the code and try again.'; return; }
-      if (room.status === 'active') { $('join-status').textContent = 'Game already in progress.'; return; }
       var cfg = room.config;
+
+      if (room.status === 'active') {
+        var storedName = room.players && room.players[1] && room.players[1].name;
+        if (guestName !== storedName) { $('join-status').textContent = 'Game already in progress.'; return; }
+        var guestPresent = room.presence && room.presence[1];
+        if (guestPresent) { $('join-status').textContent = 'Game already in progress.'; return; }
+        // Same username and guest not currently connected — rejoin
+        roomCode   = code;
+        myPid      = 1;
+        onlineMode = true;
+        currentHandN = 0;   // reset so hand listener fires immediately
+        _lastSyncedTurnId = 0; _lastTurnData = null; // reset so timer sync fires
+        setupHandListener();
+        setupActionListener();
+        setupPresence();
+        setupPresenceListener(0);
+        setupServerTimeOffset();
+        setupTurnListener();
+        $('setup-screen').style.display = 'none';
+        $('game-screen').style.display  = 'flex';
+        newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
+        return;
+      }
 
       roomCode   = code;
       myPid      = 1;
@@ -3209,6 +3275,10 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       // Set up listeners before showing game screen
       setupHandListener();
       setupActionListener();
+      setupPresence();
+      setupPresenceListener(0);
+      setupServerTimeOffset();
+      setupTurnListener();
 
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
@@ -3238,6 +3308,50 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       actionSeenKey = actionKey;
       if (data.pid === myPid) return;           // my own action, already executed locally
       enqueueRemoteAction(data);
+    });
+  }
+
+  // ---- Server time sync & turn timer ----
+  function setupServerTimeOffset() {
+    db.ref('.info/serverTimeOffset').on('value', function(snap) {
+      serverTimeOffset = snap.val() || 0;
+    });
+  }
+
+  function setupTurnListener() {
+    db.ref('rooms/'+roomCode+'/currentTurn').on('value', function(snap) {
+      _lastTurnData = snap.val();
+      _maybeSyncTimer();
+    });
+  }
+
+  // ---- Presence / disconnect detection ----
+  var _disconnectTimer = null;
+
+  function setupPresence() {
+    var presRef = db.ref('rooms/'+roomCode+'/presence/'+myPid);
+    presRef.set(true);
+    presRef.onDisconnect().remove();
+    // Re-assert presence on reconnect (handles brief network drops)
+    db.ref('.info/connected').on('value', function(snap) {
+      if (snap.val()) { presRef.set(true); }
+    });
+  }
+
+  function setupPresenceListener(oppPid) {
+    db.ref('rooms/'+roomCode+'/presence/'+oppPid).on('value', function(snap) {
+      var present = !!snap.val();
+      if (!present) {
+        if (!_disconnectTimer) {
+          _disconnectTimer = setTimeout(function() {
+            _disconnectTimer = null;
+            if (G && G.cfg) $('pname'+oppPid).textContent = G.cfg.names[oppPid] + ' (disconnected)';
+          }, 5000);
+        }
+      } else {
+        if (_disconnectTimer) { clearTimeout(_disconnectTimer); _disconnectTimer = null; }
+        if (G && G.cfg) $('pname'+oppPid).textContent = G.cfg.names[oppPid];
+      }
     });
   }
 
