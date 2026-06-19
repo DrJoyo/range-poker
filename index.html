@@ -2907,20 +2907,21 @@ var RP = (function() {
   // ---- Timer ----
   function _startTimerWithRemaining(pid, remaining, onDone) {
     if (G.timerInt) { clearInterval(G.timerInt); G.timerInt=null; }
-    G.timerLeft = remaining;
+    var deadline = Date.now() + remaining * 1000;
     var fill=$('tfill'+pid), text=$('ttext'+pid), row=$('timer'+pid);
     row.classList.add('active');
-    var pct = Math.max(0, G.timerLeft / G.cfg.timeLimit * 100);
+    var pct = Math.max(0, remaining / G.cfg.timeLimit * 100);
     fill.style.transition='none';
     fill.style.width=(100-pct)+'%';
-    text.textContent=G.timerLeft+'s';
+    text.textContent=remaining+'s';
     G.timerInt=setInterval(function(){
-      G.timerLeft--;
-      var p=Math.max(0, G.timerLeft/G.cfg.timeLimit*100);
+      var msLeft = deadline - Date.now();
+      if (msLeft <= 0) { stopTimer(); onDone(); return; }
+      var left = Math.ceil(msLeft / 1000);
+      var p = Math.max(0, msLeft / (G.cfg.timeLimit * 1000) * 100);
       fill.style.transition='width 1s linear';
       fill.style.width=(100-p)+'%';
-      text.textContent=G.timerLeft+'s';
-      if (G.timerLeft<=0) { stopTimer(); onDone(); }
+      text.textContent=left+'s';
     }, 1000);
   }
 
