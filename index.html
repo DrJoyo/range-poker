@@ -443,6 +443,15 @@ body {
 .range-slots.opp-view { opacity: 0.75; }
 .range-slots.opp-view .rs-save { opacity: 0.3; pointer-events: none; }
 .range-slots.opp-view .rs-name { pointer-events: none; }
+.rs-io { display: flex; gap: 3px; margin-top: 2px; }
+.rs-io-btn { flex: 1; font-size: 0.75em; padding: 3px 0; border: none; border-radius: 3px; cursor: pointer; color: #bbb; background: #252525; }
+.rs-io-btn:hover { filter: brightness(1.4); }
+.rs-import-area { display: none; flex-direction: column; gap: 3px; margin-top: 3px; }
+.rs-import-area.open { display: flex; }
+.rs-import-ta { width: 100%; height: 58px; background: #111; color: #ccc; border: 1px solid #444; border-radius: 3px; font-size: 0.65em; padding: 3px; box-sizing: border-box; resize: vertical; font-family: monospace; }
+.rs-import-apply { font-size: 0.75em; padding: 3px 0; border: none; border-radius: 3px; cursor: pointer; color: #fff; background: #1a5276; width: 100%; }
+.rs-import-apply:hover { filter: brightness(1.3); }
+.rs-import-msg { font-size: 0.7em; text-align: center; min-height: 1em; }
 
 .bet-row {
   display: none;
@@ -2658,6 +2667,15 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
           '<button class="rs-btn rs-load" onclick="RP.loadRange('+pid+','+i+')">Load</button>' +
           '</div>';
       }
+      html += '<div class="rs-io">' +
+        '<button class="rs-io-btn" onclick="RP.exportSlots('+pid+')">Export</button>' +
+        '<button class="rs-io-btn" onclick="RP.toggleImport('+pid+')">Import</button>' +
+        '</div>' +
+        '<div class="rs-import-area" id="rs-import-'+pid+'">' +
+        '<textarea class="rs-import-ta" id="rs-import-ta-'+pid+'" placeholder="Paste export text here…"></textarea>' +
+        '<button class="rs-import-apply" onclick="RP.importSlots('+pid+')">Apply</button>' +
+        '<div class="rs-import-msg" id="rs-import-msg-'+pid+'"></div>' +
+        '</div>';
       el.innerHTML = html;
     }
   }
@@ -2740,6 +2758,97 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     updateRangeSum(dest);
     updateRangeDist(dest);
     setMsg('Slot '+(i+1)+' loaded.');
+  }
+
+  // ================================================================
+  //  RANGE SLOT EXPORT / IMPORT
+  // ================================================================
+
+  var SLOT_ENC = {fold:'f', call:'c', check:'k', raise:'r', bet:'b'};
+  var SLOT_DEC = {f:'fold', c:'call', k:'check', r:'raise', b:'bet'};
+
+  function encodeSlotRanges(ranges) {
+    var out = [];
+    for (var r = 0; r < 13; r++) {
+      for (var c = 0; c < 13; c++) {
+        var type = cellType(r, c);
+        var cell = ranges[r] && ranges[r][c];
+        for (var suit of typeSuits(type)) {
+          var ck = htSuitKey(r, c, suit);
+          var a = cell && cell[ck];
+          out.push(a ? (SLOT_ENC[a] || '.') : '.');
+        }
+      }
+    }
+    return out.join('');
+  }
+
+  function decodeSlotRanges(str) {
+    var ranges = [];
+    for (var r = 0; r < 13; r++) { ranges[r] = []; for (var c = 0; c < 13; c++) ranges[r][c] = {}; }
+    var idx = 0;
+    for (var r = 0; r < 13; r++) {
+      for (var c = 0; c < 13; c++) {
+        var type = cellType(r, c);
+        for (var suit of typeSuits(type)) {
+          var ck = htSuitKey(r, c, suit);
+          var ch = str[idx++];
+          if (ch && ch !== '.') ranges[r][c][ck] = SLOT_DEC[ch];
+        }
+      }
+    }
+    return ranges;
+  }
+
+  function exportSlots(pid) {
+    var slots = preflopSlots[pid].map(function(slot, i) {
+      if (!slot) return null;
+      var name = ($('rsn-'+pid+'-'+i) || {}).textContent || ('Slot '+(i+1));
+      return { name: name, r: encodeSlotRanges(slot.ranges), b: slot.betSz || null };
+    });
+    var text = JSON.stringify({ v: 1, slots: slots });
+    navigator.clipboard.writeText(text).then(function() {
+      var btn = document.querySelector('#rs'+pid+' .rs-io-btn');
+      if (!btn) return;
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function() { btn.textContent = orig; }, 1500);
+    }).catch(function() { setMsg('Copy failed — try a browser that supports clipboard access.'); });
+  }
+
+  function toggleImport(pid) {
+    var area = $('rs-import-'+pid);
+    if (!area) return;
+    var isOpen = area.classList.toggle('open');
+    if (isOpen) { var ta = $('rs-import-ta-'+pid); if (ta) { ta.value = ''; ta.focus(); } }
+    var msg = $('rs-import-msg-'+pid);
+    if (msg) msg.textContent = '';
+  }
+
+  function importSlots(pid) {
+    var ta = $('rs-import-ta-'+pid);
+    var msgEl = $('rs-import-msg-'+pid);
+    var text = ta ? ta.value.trim() : '';
+    function err(s) { if (msgEl) { msgEl.style.color = '#e74c3c'; msgEl.textContent = s; } }
+    function ok(s)  { if (msgEl) { msgEl.style.color = '#2ecc71'; msgEl.textContent = s; } }
+    if (!text) { err('Nothing pasted.'); return; }
+    var data;
+    try { data = JSON.parse(text); } catch(e) { err('Invalid text.'); return; }
+    if (!data || data.v !== 1 || !Array.isArray(data.slots) || data.slots.length !== 5) {
+      err('Unrecognised format.'); return;
+    }
+    var loaded = 0;
+    data.slots.forEach(function(slot, i) {
+      if (!slot) { preflopSlots[pid][i] = null; return; }
+      if (typeof slot.r !== 'string' || slot.r.length !== 1326) { err('Slot '+(i+1)+' is corrupt.'); return; }
+      preflopSlots[pid][i] = { ranges: decodeSlotRanges(slot.r), betSz: slot.b || null };
+      var nameEl = $('rsn-'+pid+'-'+i);
+      if (nameEl && slot.name) nameEl.textContent = slot.name;
+      var loadBtn = document.querySelector('#rs'+pid+' .rs-slot:nth-child('+(i+2)+') .rs-load');
+      if (loadBtn) loadBtn.classList.add('has-data');
+      loaded++;
+    });
+    ok('Imported '+loaded+' slot'+(loaded===1?'':'s')+'.');
   }
 
   // ================================================================
@@ -2973,6 +3082,9 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     _buildRangeSlots: buildRangeSlots,
     saveRange: saveRange,
     loadRange: loadRange,
+    exportSlots: exportSlots,
+    toggleImport: toggleImport,
+    importSlots: importSlots,
     setSetupMode: setSetupMode,
     setOnlineSubMode: setOnlineSubMode,
     hostGame: hostGame,
