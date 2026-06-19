@@ -3072,6 +3072,26 @@ var RP = (function() {
   var SLOT_ENC = {fold:'f', call:'c', check:'k', raise:'r', bet:'b'};
   var SLOT_DEC = {f:'fold', c:'call', k:'check', r:'raise', b:'bet'};
 
+  function encodeNarrowed(set) {
+    if (set === null) return null;
+    var out = [];
+    for (var r = 0; r < 13; r++) for (var c = 0; c < 13; c++) {
+      var type = cellType(r, c);
+      for (var suit of typeSuits(type)) out.push(set.has(htSuitKey(r,c,suit)) ? '1' : '0');
+    }
+    return out.join('');
+  }
+
+  function decodeNarrowed(str) {
+    if (str === null) return null;
+    var set = new Set(), idx = 0;
+    for (var r = 0; r < 13; r++) for (var c = 0; c < 13; c++) {
+      var type = cellType(r, c);
+      for (var suit of typeSuits(type)) { if (str[idx] === '1') set.add(htSuitKey(r,c,suit)); idx++; }
+    }
+    return set;
+  }
+
   function encodeSlotRanges(ranges) {
     var out = [];
     for (var r = 0; r < 13; r++) {
@@ -3391,7 +3411,7 @@ var RP = (function() {
     processingRemoteAction = true;
     var data = remoteActionQueue.shift();
     var pid = data.pid;
-    G.narrowed[pid] = data.narrowed === null ? null : new Set(data.narrowed);
+    G.narrowed[pid] = decodeNarrowed(data.narrowed);
     colorChart(pid, false);
     updateRangeSum(pid);
     var sfx = data.betSz && (data.action==='bet'||data.action==='raise') ? ' '+fmt(data.betSz) : '';
@@ -3432,7 +3452,7 @@ var RP = (function() {
       pid:      pid,
       action:   action,
       betSz:    betSz || 0,
-      narrowed: narrowed === null ? null : Array.from(narrowed)
+      narrowed: encodeNarrowed(narrowed)
     });
   }
 
