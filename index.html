@@ -3249,6 +3249,7 @@ var RP = (function() {
       setupTurnListener();
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
+      $('debug-btn').style.display = 'none';
       newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit });
     });
   }
@@ -3287,6 +3288,7 @@ var RP = (function() {
         setupTurnListener();
         $('setup-screen').style.display = 'none';
         $('game-screen').style.display  = 'flex';
+        $('debug-btn').style.display = 'none';
         newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
         return;
       }
@@ -3308,6 +3310,7 @@ var RP = (function() {
 
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
+      $('debug-btn').style.display = 'none';
       // newMatch creates G and calls dealHand(), which returns early for the guest
       newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
     });
