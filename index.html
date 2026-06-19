@@ -525,6 +525,17 @@ body {
   cursor: pointer;
 }
 .btn-fold-early:hover { background: #3a1010; }
+.btn-undo {
+  background: #1c1c1c;
+  border: 1px solid #333;
+  color: #999;
+  border-radius: 5px;
+  padding: 5px 14px;
+  font-size: 0.78em;
+  cursor: pointer;
+}
+.btn-undo:hover { background: #2a2a2a; }
+.btn-undo:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
 /* Log */
 #log {
@@ -854,6 +865,7 @@ body {
         </div>
         <div class="submit-row">
           <button class="btn-draft" onclick="RP.saveDraft()">Save Draft</button>
+          <button class="btn-undo" id="undo-btn" onclick="RP.undoLast()" disabled>Undo</button>
           <button class="btn-submit" onclick="RP.submit()">Submit</button>
         </div>
       </div>
@@ -1374,6 +1386,8 @@ var RP = (function() {
     earlyFolded[pid] = new Set();
     G.draft[pid]=null;
     G.draftBetSz[pid]=null;
+    undoStack=[];
+    $('undo-btn').disabled=true;
     $('bet-inp').value='';
 
     colorChart(pid, true);
@@ -1675,6 +1689,7 @@ var RP = (function() {
   // ---- Drag selection ----
   var selMode = 'free'; // 'rect' | 'free'
   var drag = { on:false, startR:-1, startC:-1, pid:-1, cells: new Set(), removing:false, gesture: new Set() };
+  var undoStack = [];
   var preflopSlots = [
     [null,null,null,null,null],
     [null,null,null,null,null]
@@ -2295,6 +2310,7 @@ var RP = (function() {
 
   // ---- Assign selection ----
   function assignSelection(pid, action) {
+    var delta = {};
     drag.cells.forEach(function(key) {
       var parts=key.split(',');
       var r=+parts[0], c=+parts[1];
@@ -2304,11 +2320,33 @@ var RP = (function() {
       for (var suit of typeSuits(type)) {
         if (!filter.has(suit)) continue;
         var ck=htSuitKey(r,c,suit);
-        if (ck in map) map[ck]=action;
+        if (ck in map) { delta[ck]=map[ck]; map[ck]=action; }
       }
     });
+    if (Object.keys(delta).length > 0) {
+      undoStack.push({ pid: pid, delta: delta });
+      $('undo-btn').disabled=false;
+    }
     drag.cells=new Set();
     refreshDragHighlight();
+    colorChart(pid, true);
+    updateRangeSum(pid);
+    updateRangeDist(pid);
+  }
+
+  function undoLast() {
+    if (undoStack.length === 0) return;
+    var entry = undoStack.pop();
+    var pid = entry.pid;
+    for (var r = 0; r < 13; r++) {
+      for (var c = 0; c < 13; c++) {
+        var map = G.ranges[pid][r][c];
+        for (var ck in map) {
+          if (ck in entry.delta) map[ck] = entry.delta[ck];
+        }
+      }
+    }
+    $('undo-btn').disabled = undoStack.length === 0;
     colorChart(pid, true);
     updateRangeSum(pid);
     updateRangeDist(pid);
@@ -3065,6 +3103,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     startGame: startGame,
     openSettings: openSettings,
     saveDraft: saveDraft,
+    undoLast: undoLast,
     foldEarly: foldEarly,
     submit: function(){ submit(false); },
     nextHand: nextHand,
