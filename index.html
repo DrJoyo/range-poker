@@ -1559,7 +1559,7 @@ var RP = (function() {
           sr.style.background = (ck && earlyFolded[pid].has(ck)) ? '#172540' : '#0a0f0a';
         } else if (isActive) {
           if (!suitFilter[type].has(suit)) {
-            sr.style.background='#162e16'; // toggled off — shown as dim gray
+            sr.style.background='#1e1e1e'; // toggled off — shown as dark gray
           } else {
             sr.style.background=actionColor(map[ck]);
           }
@@ -1981,7 +1981,7 @@ var RP = (function() {
     globalRow.appendChild(gab); globalRow.appendChild(gnb);
     body.appendChild(globalRow);
 
-    makeSection('Suited',  'suited',  SUITED_SUITS,  4);
+    makeSection('Suited',  'suited',  SUITED_SUITS,  2);
     makeSection('Offsuit', 'offsuit', OFFSUIT_SUITS, 3);
     makeSection('Pairs',   'pair',    PAIR_SUITS,    3);
   }
@@ -2824,6 +2824,7 @@ var RP = (function() {
 
   // ---- Showdown ----
   function showdown() {
+    stopTimer();
     buildComboStrengthIndex();
     hideActionPanel();
     renderHole(0,true); renderHole(1,true);
