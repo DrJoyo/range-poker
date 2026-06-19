@@ -221,8 +221,9 @@ body {
 .hcs-suited  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .hcs-offsuit { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr 1fr; }
 .hcs-pair    { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.hc-suit { background: #0a0f0a; }
-.hc.drag-sel { outline: 2px solid rgba(255,255,255,0.85); outline-offset: -1px; z-index: 3; }
+.hc-suit { background: #0a0f0a; position: relative; }
+.hc.drag-sel { z-index: 3; }
+.hc-suit.drag-sel::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,0.36); pointer-events:none; z-index:4; }
 
 /* Suit filter panel */
 #suit-filter { border-top: 1px solid #1a3a22; margin-top: 3px; padding-top: 3px; }
@@ -1781,6 +1782,19 @@ var RP = (function() {
     [null,null,null,null,null]
   ];
 
+  function filteredCombosForCell(pid, r, c) {
+    var map=G.ranges[pid][r][c];
+    var type=cellType(r,c);
+    var filter=suitFilter[type];
+    var result=[];
+    for(var suit of typeSuits(type)){
+      if(!filter.has(suit)) continue;
+      var ck=htSuitKey(r,c,suit);
+      if(ck in map) result.push(ck);
+    }
+    return result;
+  }
+
   function deselectAll() {
     drag.cells=new Set();
     refreshDragHighlight();
@@ -1789,14 +1803,8 @@ var RP = (function() {
   function selectAll() {
     var pid=G.actPid;
     for(var r=0;r<13;r++) for(var c=0;c<13;c++){
-      var map=G.ranges[pid][r][c];
-      var type=cellType(r,c);
-      var filter=suitFilter[type];
-      for(var suit of typeSuits(type)){
-        if(!filter.has(suit)) continue;
-        var ck=htSuitKey(r,c,suit);
-        if(ck in map){ drag.cells.add(r+','+c); break; }
-      }
+      var cks=filteredCombosForCell(pid,r,c);
+      for(var i=0;i<cks.length;i++) drag.cells.add(cks[i]);
     }
     refreshDragHighlight();
   }
@@ -1823,14 +1831,18 @@ var RP = (function() {
       var cell=e.target.closest('.hc');
       if (!cell) return;
       e.preventDefault();
-      var key=cell.dataset.r+','+cell.dataset.c;
-      drag.removing = drag.cells.has(key);
+      var cr=+cell.dataset.r, cc=+cell.dataset.c;
+      var cks=filteredCombosForCell(pid,cr,cc);
+      // removing mode if ALL filtered combos for this cell are already selected
+      drag.removing = cks.length>0 && cks.some(function(ck){ return drag.cells.has(ck); });
       drag.on=true; drag.pid=pid;
-      drag.startR=+cell.dataset.r; drag.startC=+cell.dataset.c;
+      drag.startR=cr; drag.startC=cc;
       drag.prevCells=new Set(drag.cells); // snapshot before this drag
-      drag.gesture=new Set([key]);
+      drag.gesture=new Set([cr+','+cc]);
       // Apply first cell immediately
-      if (drag.removing) drag.cells.delete(key); else drag.cells.add(key);
+      for(var i=0;i<cks.length;i++){
+        if(drag.removing) drag.cells.delete(cks[i]); else drag.cells.add(cks[i]);
+      }
       refreshDragHighlight();
     });
 
@@ -1839,9 +1851,15 @@ var RP = (function() {
       var cell=e.target.closest('.hc');
       if (!cell) return;
       if (selMode==='free') {
-        var key=cell.dataset.r+','+cell.dataset.c;
-        drag.gesture.add(key);
-        if (drag.removing) drag.cells.delete(key); else drag.cells.add(key);
+        var cr=+cell.dataset.r, cc=+cell.dataset.c;
+        var key=cr+','+cc;
+        if(!drag.gesture.has(key)){
+          drag.gesture.add(key);
+          var cks=filteredCombosForCell(pid,cr,cc);
+          for(var i=0;i<cks.length;i++){
+            if(drag.removing) drag.cells.delete(cks[i]); else drag.cells.add(cks[i]);
+          }
+        }
       } else {
         var cr=+cell.dataset.r, cc=+cell.dataset.c;
         var minR=Math.min(drag.startR,cr), maxR=Math.max(drag.startR,cr);
@@ -1849,8 +1867,10 @@ var RP = (function() {
         // Rebuild the rect relative to start, then apply to the accumulated set
         drag.cells=new Set(drag.prevCells||[]);
         for(var rr=minR;rr<=maxR;rr++) for(var cc2=minC;cc2<=maxC;cc2++) {
-          var k=rr+','+cc2;
-          if (drag.removing) drag.cells.delete(k); else drag.cells.add(k);
+          var cks=filteredCombosForCell(pid,rr,cc2);
+          for(var i=0;i<cks.length;i++){
+            if(drag.removing) drag.cells.delete(cks[i]); else drag.cells.add(cks[i]);
+          }
         }
       }
       refreshDragHighlight();
@@ -1860,12 +1880,20 @@ var RP = (function() {
   function refreshDragHighlight() {
     var chart=$('chart'+G.actPid);
     if (!chart) return;
+    var pid=G.actPid;
     chart.querySelectorAll('.hc').forEach(function(cell){
-      var key=cell.dataset.r+','+cell.dataset.c;
-      var on=drag.cells.has(key);
-      cell.dataset.dragsel=on?'1':'0';
-      if (on) cell.classList.add('drag-sel');
-      else cell.classList.remove('drag-sel');
+      var r=+cell.dataset.r, c=+cell.dataset.c;
+      var type=cellType(r,c);
+      var suits=typeSuits(type);
+      var anySel=false;
+      cell.querySelectorAll('.hc-suit').forEach(function(sr, idx){
+        var ck=htSuitKey(r,c,suits[idx]);
+        var on=drag.cells.has(ck);
+        if(on) anySel=true;
+        if(on) sr.classList.add('drag-sel'); else sr.classList.remove('drag-sel');
+      });
+      cell.dataset.dragsel=anySel?'1':'0';
+      if(anySel) cell.classList.add('drag-sel'); else cell.classList.remove('drag-sel');
     });
     var btn=$('sel-all-btn');
     if(btn){
@@ -2228,26 +2256,14 @@ var RP = (function() {
 
   function selectCategory(catId, ba, board) {
     var pid=G.actPid;
-    var asf=autoSuitFilter(catId,ba);
-    if(asf){
-      suitFilter.suited=asf.suited;
-      suitFilter.offsuit=asf.offsuit;
-      suitFilter.pair=asf.pair;
-      refreshSuitFilterBtns();
-      colorChart(pid,true);
-    }
     for(var r=0;r<13;r++) for(var c=0;c<13;c++){
       var map=G.ranges[pid][r][c];
       var type=cellType(r,c);
-      var filter=suitFilter[type];
-      var anyMatch=false;
       for(var suit of typeSuits(type)){
-        if(!filter.has(suit)) continue;
         var ck=htSuitKey(r,c,suit);
         if(!(ck in map)) continue;
-        if(matchesCategory(ck.slice(0,2),ck.slice(2,4),catId,ba,board)){anyMatch=true;break;}
+        if(matchesCategory(ck.slice(0,2),ck.slice(2,4),catId,ba,board)) drag.cells.add(ck);
       }
-      if(anyMatch) drag.cells.add(r+','+c);
     }
     refreshDragHighlight();
   }
@@ -2398,17 +2414,10 @@ var RP = (function() {
   // ---- Assign selection ----
   function assignSelection(pid, action) {
     var delta = {};
-    drag.cells.forEach(function(key) {
-      var parts=key.split(',');
-      var r=+parts[0], c=+parts[1];
-      var map=G.ranges[pid][r][c];
-      var type=cellType(r,c);
-      var filter=suitFilter[type];
-      for (var suit of typeSuits(type)) {
-        if (!filter.has(suit)) continue;
-        var ck=htSuitKey(r,c,suit);
-        if (ck in map) { delta[ck]=map[ck]; map[ck]=action; }
-      }
+    drag.cells.forEach(function(ck) {
+      var rc=comboToRC(ck);
+      var map=G.ranges[pid][rc.r][rc.c];
+      if (ck in map) { delta[ck]=map[ck]; map[ck]=action; }
     });
     if (Object.keys(delta).length > 0) {
       undoStack.push({ pid: pid, delta: delta });
@@ -2478,26 +2487,19 @@ var RP = (function() {
     }
 
     var delta = {};
-    drag.cells.forEach(function(key) {
-      var parts = key.split(',');
-      var r = +parts[0], c = +parts[1];
-      var map = G.ranges[pid][r][c];
-      var type = cellType(r, c);
-      var filter = suitFilter[type];
-      for (var suit of typeSuits(type)) {
-        if (!filter.has(suit)) continue;
-        var ck = htSuitKey(r, c, suit);
-        if (!(ck in map)) continue;
-        delta[ck] = map[ck];
-        var roll = Math.random() * 100;
-        if (facing) {
-          if (roll < callPct) map[ck] = 'call';
-          else if (roll < callPct + raisePct) map[ck] = 'raise';
-          else map[ck] = 'fold';
-        } else {
-          if (roll < betPct) map[ck] = G.curBetTo > 0 ? 'raise' : 'bet';
-          else map[ck] = 'check';
-        }
+    drag.cells.forEach(function(ck) {
+      var rc = comboToRC(ck);
+      var map = G.ranges[pid][rc.r][rc.c];
+      if (!(ck in map)) return;
+      delta[ck] = map[ck];
+      var roll = Math.random() * 100;
+      if (facing) {
+        if (roll < callPct) map[ck] = 'call';
+        else if (roll < callPct + raisePct) map[ck] = 'raise';
+        else map[ck] = 'fold';
+      } else {
+        if (roll < betPct) map[ck] = G.curBetTo > 0 ? 'raise' : 'bet';
+        else map[ck] = 'check';
       }
     });
 
