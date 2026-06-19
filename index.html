@@ -47,6 +47,9 @@ body {
   justify-content: space-between;
 }
 .setup-row label { color: #aaa; }
+.setup-row.setup-toggle { justify-content: flex-start; gap: 10px; cursor: pointer; }
+.setup-row.setup-toggle label { cursor: pointer; }
+.setup-row.setup-toggle input[type=checkbox] { width: 16px; height: 16px; accent-color: #f0c040; cursor: pointer; }
 .setup-row input {
   background: #0f3a1a;
   border: 1px solid #1a5c2e;
@@ -616,6 +619,7 @@ body {
 .sd-cards .card { width: 60px; height: 86px; }
 #sd-vs { font-size: 0.7em; font-weight: 700; color: #444; letter-spacing: 0.1em; }
 #sd-pot { color: #2ecc71; font-size: 1.15em; font-weight: 700; border-top: 1px solid #1a3a22; padding-top: 10px; }
+#sd-pot.ev-split { font-size: 0.88em; line-height: 1.5; }
 .btn-continue {
   background: linear-gradient(135deg, #f0c040, #e67e22);
   color: #111;
@@ -727,6 +731,10 @@ body {
       <label>Player 2 Name</label>
       <input type="text" id="cfg-p2" value="Player 2" style="text-align:left;">
     </div>
+    <div class="setup-row setup-toggle">
+      <input type="checkbox" id="cfg-ev-split">
+      <label for="cfg-ev-split">Range EV Split at Showdown</label>
+    </div>
     <button class="btn-start" onclick="RP.startGame()">Start Game</button>
   </div>
 
@@ -750,6 +758,10 @@ body {
       <div class="setup-row">
         <label>Time per Turn (sec)</label>
         <input type="number" id="cfg-online-time" value="120" min="5" max="300" step="5">
+      </div>
+      <div class="setup-row setup-toggle">
+        <input type="checkbox" id="cfg-online-ev-split">
+        <label for="cfg-online-ev-split">Range EV Split at Showdown</label>
       </div>
       <button class="btn-start" id="btn-create-room" onclick="RP.hostGame()">Create Room</button>
       <div id="host-waiting" style="display:none">
@@ -1173,9 +1185,7 @@ var RP = (function() {
   // ---- DOM helpers ----
   function $(id) { return document.getElementById(id); }
   function fmt(bb) {
-    if (bb===Math.round(bb)) return bb+'bb';
-    var s = bb.toFixed(1);
-    return (s.endsWith('.0') ? bb+'bb' : s+'bb');
+    return +bb.toFixed(2)+'bb';
   }
   function setMsg(txt) { $('msg-banner').textContent = txt; }
   function addLog(txt, type) {
@@ -1210,7 +1220,8 @@ var RP = (function() {
     var cfg = {
       startStack: parseFloat($('cfg-stack').value)||100,
       timeLimit:  parseInt($('cfg-time').value)||20,
-      names: [$('cfg-p1').value||'Player 1', $('cfg-p2').value||'Player 2']
+      names: [$('cfg-p1').value||'Player 1', $('cfg-p2').value||'Player 2'],
+      evSplit: $('cfg-ev-split').checked
     };
     $('setup-screen').style.display='none';
     $('game-screen').style.display='flex';
@@ -2263,10 +2274,10 @@ var RP = (function() {
     ps.innerHTML='';
     var sizes=[
       {l:'Min', v:minRaiseTotal},
-      {l:'1/3P', v:+(G.curBetTo+pot/3).toFixed(1)},
-      {l:'½P',  v:+(G.curBetTo+pot*0.5).toFixed(1)},
-      {l:'¾P',  v:+(G.curBetTo+pot*0.75).toFixed(1)},
-      {l:'Pot',  v:+(G.curBetTo+pot).toFixed(1)},
+      {l:'1/3P', v:+(G.curBetTo+pot/3).toFixed(2)},
+      {l:'½P',  v:+(G.curBetTo+pot*0.5).toFixed(2)},
+      {l:'¾P',  v:+(G.curBetTo+pot*0.75).toFixed(2)},
+      {l:'Pot',  v:+(G.curBetTo+pot).toFixed(2)},
       {l:'Allin',v:effectiveMax},
     ];
     sizes.forEach(function(sz){
@@ -2279,7 +2290,7 @@ var RP = (function() {
       if (illegal) {
         b.disabled=true;
       } else {
-        b.addEventListener('click',function(){ $('bet-inp').value=capped.toFixed(1); });
+        b.addEventListener('click',function(){ $('bet-inp').value=capped.toFixed(2); });
       }
       ps.appendChild(b);
     });
@@ -2289,8 +2300,8 @@ var RP = (function() {
 
     // Only set default value when first opening the panel (input is empty)
     if (!$('bet-inp').value) {
-      var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(1),1,minRaiseTotal):minRaiseTotal;
-      $('bet-inp').value=Math.min(defBet, effectiveMax).toFixed(1);
+      var defBet=G.curBetTo===0?Math.max(+(pot*0.5).toFixed(2),1,minRaiseTotal):minRaiseTotal;
+      $('bet-inp').value=Math.min(defBet, effectiveMax).toFixed(2);
     }
   }
 
@@ -2554,6 +2565,64 @@ var RP = (function() {
     setTimeout(function(){ showdown(); }, 800);
   }
 
+  // ---- Range EV computation ----
+  // Returns { ev0, ev1 } — fractions of the pot each player's range wins on average.
+  function computeRangeEV(board) {
+    var boardSet = new Set(board);
+
+    // Collect valid combos for each player from their narrowed range (or full range).
+    function validCombos(pid) {
+      var out = [];
+      var narrowed = G.narrowed[pid]; // Set<comboKey> or null
+      for (var r = 0; r < 13; r++) {
+        for (var c = 0; c < 13; c++) {
+          var map = G.ranges[pid][r][c];
+          if (!map) continue;
+          for (var ck in map) {
+            if (narrowed !== null && !narrowed.has(ck)) continue;
+            // ck is 4 chars: c1[0..1] c2[2..3]
+            var card1 = ck.slice(0,2), card2 = ck.slice(2,4);
+            if (boardSet.has(card1) || boardSet.has(card2)) continue;
+            out.push(ck);
+          }
+        }
+      }
+      return out;
+    }
+
+    var combos0 = validCombos(0);
+    var combos1 = validCombos(1);
+
+    // Pre-compute ranks for every combo before the double loop so evalHand
+    // is called O(N) times instead of O(N²).
+    var ranks0 = combos0.map(function(ck) {
+      return evalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+    });
+    var ranks1 = combos1.map(function(ck) {
+      return evalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+    });
+
+    var wins0 = 0, wins1 = 0, ties = 0;
+    for (var i = 0; i < combos0.length; i++) {
+      var ck0 = combos0[i];
+      var a0 = ck0.slice(0,2), b0 = ck0.slice(2,4);
+      var r0 = ranks0[i];
+      for (var j = 0; j < combos1.length; j++) {
+        var ck1 = combos1[j];
+        var a1 = ck1.slice(0,2), b1 = ck1.slice(2,4);
+        if (a1===a0||a1===b0||b1===a0||b1===b0) continue;
+        var r1 = ranks1[j];
+        if (r0 > r1) wins0++;
+        else if (r1 > r0) wins1++;
+        else ties++;
+      }
+    }
+
+    var total = wins0 + wins1 + ties;
+    if (total === 0) return { ev0: 0.5, ev1: 0.5 };
+    return { ev0: (wins0 + ties * 0.5) / total, ev1: (wins1 + ties * 0.5) / total };
+  }
+
   // ---- Showdown ----
   function showdown() {
     renderHole(0,true); renderHole(1,true);
@@ -2561,13 +2630,35 @@ var RP = (function() {
     var h0=evalHand([...G.hole[0],...board]);
     var h1=evalHand([...G.hole[1],...board]);
     var pot=G.pot;
-    var winner=-1, title='Split Pot!';
-    if (h0.rank>h1.rank) { winner=0; title=G.cfg.names[0]+' Wins!'; G.stacks[0]+=pot; }
-    else if (h1.rank>h0.rank) { winner=1; title=G.cfg.names[1]+' Wins!'; G.stacks[1]+=pot; }
-    else { G.stacks[0]+=pot/2; G.stacks[1]+=pot/2; }
+    var winner=-1, title, potText, sdP0class, sdP1class;
+
+    if (G.cfg.evSplit) {
+      var ev = computeRangeEV(board);
+      // Round to nearest 0.01bb (matching bet-sizing granularity)
+      var award0 = Math.round(ev.ev0 * pot * 100) / 100;
+      var award1 = pot - award0;
+      G.stacks[0] += award0;
+      G.stacks[1] += award1;
+      title = 'Range EV Split';
+      potText = G.cfg.names[0]+' +'+fmt(award0)+' ('+Math.round(ev.ev0*1000)/10+'%) · '+G.cfg.names[1]+' +'+fmt(award1)+' ('+Math.round(ev.ev1*1000)/10+'%)';
+      // Still highlight winner for CSS (majority EV share), or neutral on near-50/50
+      if (award0 > award1) { winner = 0; }
+      else if (award1 > award0) { winner = 1; }
+      sdP0class = 'sd-player'+(winner===0?' sd-winner':winner===1?' sd-loser':'');
+      sdP1class = 'sd-player'+(winner===1?' sd-winner':winner===0?' sd-loser':'');
+      addLog('SHOWDOWN (EV): '+G.cfg.names[0]+': '+h0.desc+' | '+G.cfg.names[1]+': '+h1.desc+' → '+potText, 'log-result');
+    } else {
+      if (h0.rank>h1.rank) { winner=0; title=G.cfg.names[0]+' Wins!'; G.stacks[0]+=pot; }
+      else if (h1.rank>h0.rank) { winner=1; title=G.cfg.names[1]+' Wins!'; G.stacks[1]+=pot; }
+      else { title='Split Pot!'; G.stacks[0]+=pot/2; G.stacks[1]+=pot/2; }
+      potText = winner>=0 ? G.cfg.names[winner]+' wins '+fmt(pot) : 'Split '+fmt(pot);
+      sdP0class = 'sd-player'+(winner===0?' sd-winner':winner===1?' sd-loser':'');
+      sdP1class = 'sd-player'+(winner===1?' sd-winner':winner===0?' sd-loser':'');
+      addLog('SHOWDOWN: '+G.cfg.names[0]+': '+h0.desc+' | '+G.cfg.names[1]+': '+h1.desc+' → '+title, 'log-result');
+    }
+
     G.pot=0; G.handOver=true;
     updateUI();
-    addLog('SHOWDOWN: '+G.cfg.names[0]+': '+h0.desc+' | '+G.cfg.names[1]+': '+h1.desc+' → '+title, 'log-result');
 
     // Show overlay
     $('sd-title').textContent=title;
@@ -2579,9 +2670,10 @@ var RP = (function() {
     var c1=$('sd-c1'); c1.innerHTML='';
     G.hole[0].forEach(function(c){ c0.appendChild(makeCard(c,false)); });
     G.hole[1].forEach(function(c){ c1.appendChild(makeCard(c,false)); });
-    $('sd-pot').textContent=winner>=0?G.cfg.names[winner]+' wins '+fmt(pot):'Split '+fmt(pot);
-    $('sd-p0').className='sd-player'+(winner===0?' sd-winner':winner===1?' sd-loser':'');
-    $('sd-p1').className='sd-player'+(winner===1?' sd-winner':winner===0?' sd-loser':'');
+    $('sd-pot').textContent=potText;
+    $('sd-pot').className=G.cfg.evSplit?'ev-split':'';
+    $('sd-p0').className=sdP0class;
+    $('sd-p1').className=sdP1class;
     $('showdown-overlay').classList.add('show');
   }
 
@@ -2790,7 +2882,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     }
     if (slot.betSz) {
       var minRaiseTotal = G.curBetTo === 0 ? 1 : G.curBetTo + G.lastRaiseAmt;
-      $('bet-inp').value = Math.max(slot.betSz, minRaiseTotal).toFixed(1);
+      $('bet-inp').value = Math.max(slot.betSz, minRaiseTotal).toFixed(2);
     }
     colorChart(dest, true);
     updateRangeSum(dest);
@@ -2921,6 +3013,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
     var hostName   = $('cfg-host-name').value   || 'Player 1';
     var startStack = parseFloat($('cfg-online-stack').value) || 100;
     var timeLimit  = parseInt($('cfg-online-time').value)    || 120;
+    var evSplit    = $('cfg-online-ev-split').checked;
 
     roomCode  = generateRoomCode();
     myPid     = 0;
@@ -2928,7 +3021,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
 
     db.ref('rooms/'+roomCode).set({
       status: 'waiting',
-      config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit }
+      config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit, evSplit: evSplit }
     });
 
     // Show room code and share link
@@ -2946,7 +3039,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       setupActionListener();
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
-      newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name] });
+      newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit });
     });
   }
 
@@ -2977,7 +3070,7 @@ if (G.timerLeft<=0) { stopTimer(); onDone(); }
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
       // newMatch creates G and calls dealHand(), which returns early for the guest
-      newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName] });
+      newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
     });
   }
 
@@ -3142,8 +3235,8 @@ document.addEventListener('DOMContentLoaded', function(){
     var val = parseFloat(this.value);
     var min = parseFloat(this.min);
     var max = parseFloat(this.max);
-    if (min && val < min) this.value = min.toFixed(1);
-    else if (max && val > max) this.value = max.toFixed(1);
+    if (min && val < min) this.value = min.toFixed(2);
+    else if (max && val > max) this.value = max.toFixed(2);
   });
 
   // If URL contains ?room=CODE, switch straight to the join screen
