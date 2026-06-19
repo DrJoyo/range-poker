@@ -2495,7 +2495,7 @@ var RP = (function() {
           else if (roll < callPct + raisePct) map[ck] = 'raise';
           else map[ck] = 'fold';
         } else {
-          if (roll < betPct) map[ck] = 'bet';
+          if (roll < betPct) map[ck] = G.curBetTo > 0 ? 'raise' : 'bet';
           else map[ck] = 'check';
         }
       }
