@@ -242,6 +242,7 @@ body {
 .rz-inp:disabled { opacity:0.4; cursor:not-allowed; }
 .rz-go-btn { background:#2a5a2a; border:1px solid #4a9a4a; color:#cfc; font-size:0.72em; border-radius:3px; padding:3px 10px; cursor:pointer; width:100%; }
 .rz-go-btn:hover { filter:brightness(1.3); }
+.rz-disp { font-size:0.72em; color:#7a9; background:#0a1f12; border:1px solid #1a3a22; padding:2px 4px; border-radius:3px; width:52px; text-align:right; display:inline-block; box-sizing:border-box; }
 #ht-body { margin-top:4px; display:flex; flex-wrap:wrap; gap:3px; }
 .ht-btn { background:#0f2a1a; border:1px solid #1a4a2a; color:#9cc; font-size:0.63em; border-radius:3px; padding:2px 5px; cursor:pointer; white-space:nowrap; }
 .ht-btn:hover { background:#1a3a20; color:#eff; }
@@ -896,17 +897,25 @@ body {
             <div id="rz-facing" style="display:none">
               <div class="rz-row">
                 <label class="rz-lbl">Call %</label>
-                <input type="number" id="rz-call-pct" class="rz-inp" min="0" max="100" step="1" value="33">
+                <input type="number" id="rz-call-pct" class="rz-inp" min="0" max="100" step="5" value="33" onchange="RP.rzCallInput()">
               </div>
               <div class="rz-row">
                 <label class="rz-lbl">Raise %</label>
-                <input type="number" id="rz-raise-pct" class="rz-inp" min="0" max="100" step="1" value="33">
+                <input type="number" id="rz-raise-pct" class="rz-inp" min="0" max="100" step="5" value="33" onchange="RP.rzRaiseInput()">
+              </div>
+              <div class="rz-row">
+                <label class="rz-lbl">Fold %</label>
+                <span class="rz-disp" id="rz-fold-pct">34%</span>
               </div>
             </div>
             <div id="rz-not-facing" style="display:none">
               <div class="rz-row">
-                <label class="rz-lbl">Bet %</label>
-                <input type="number" id="rz-bet-pct" class="rz-inp" min="0" max="100" step="1" value="50">
+                <label class="rz-lbl" id="rz-bet-lbl">Bet %</label>
+                <input type="number" id="rz-bet-pct" class="rz-inp" min="0" max="100" step="5" value="50" onchange="RP.rzBetInput()">
+              </div>
+              <div class="rz-row">
+                <label class="rz-lbl" id="rz-check-lbl">Check %</label>
+                <span class="rz-disp" id="rz-check-pct">50%</span>
               </div>
             </div>
             <div class="rz-row" style="margin-top:4px;">
@@ -2456,6 +2465,41 @@ var RP = (function() {
     $('rz-toggle-btn').textContent = (open ? '▾' : '▸') + ' Randomize';
   }
 
+  function rzUpdateFoldDisplay() {
+    var callV = parseFloat($('rz-call-pct').value) || 0;
+    var raiseV = parseFloat($('rz-raise-pct').value) || 0;
+    $('rz-fold-pct').textContent = Math.max(0, Math.round(100 - callV - raiseV)) + '%';
+  }
+
+  function rzUpdateCheckDisplay() {
+    var betV = parseFloat($('rz-bet-pct').value) || 0;
+    $('rz-check-pct').textContent = Math.max(0, Math.round(100 - betV)) + '%';
+  }
+
+  function rzCallInput() {
+    var callEl = $('rz-call-pct'), raiseEl = $('rz-raise-pct');
+    var callV = Math.min(100, Math.max(0, parseFloat(callEl.value) || 0));
+    callEl.value = callV;
+    var raiseV = parseFloat(raiseEl.value) || 0;
+    if (callV + raiseV > 100) raiseEl.value = Math.max(0, 100 - callV);
+    rzUpdateFoldDisplay();
+  }
+
+  function rzRaiseInput() {
+    var callEl = $('rz-call-pct'), raiseEl = $('rz-raise-pct');
+    var raiseV = Math.min(100, Math.max(0, parseFloat(raiseEl.value) || 0));
+    raiseEl.value = raiseV;
+    var callV = parseFloat(callEl.value) || 0;
+    if (callV + raiseV > 100) callEl.value = Math.max(0, 100 - raiseV);
+    rzUpdateFoldDisplay();
+  }
+
+  function rzBetInput() {
+    var betEl = $('rz-bet-pct');
+    betEl.value = Math.min(100, Math.max(0, parseFloat(betEl.value) || 0));
+    rzUpdateCheckDisplay();
+  }
+
   function updateRandomizeUI(facing, facingAllIn) {
     $('rz-facing').style.display = facing ? '' : 'none';
     $('rz-not-facing').style.display = facing ? 'none' : '';
@@ -2466,6 +2510,11 @@ var RP = (function() {
     } else {
       raiseInp.disabled = false;
     }
+    var limpedBB = !facing && G.curBetTo > 0;
+    $('rz-bet-lbl').textContent = limpedBB ? 'Raise %' : 'Bet %';
+    $('rz-check-lbl').textContent = limpedBB ? 'Check %' : 'Check %';
+    rzUpdateFoldDisplay();
+    rzUpdateCheckDisplay();
   }
 
   function randomizeRange() {
@@ -2478,10 +2527,7 @@ var RP = (function() {
     if (facing) {
       callPct = Math.max(0, Math.min(100, parseFloat($('rz-call-pct').value) || 0));
       raisePct = facingAllIn ? 0 : Math.max(0, Math.min(100, parseFloat($('rz-raise-pct').value) || 0));
-      if (callPct + raisePct > 100) {
-        alert('Call % and Raise % must not exceed 100%.');
-        return;
-      }
+      if (callPct + raisePct > 100) raisePct = Math.max(0, 100 - callPct);
     } else {
       betPct = Math.max(0, Math.min(100, parseFloat($('rz-bet-pct').value) || 0));
     }
@@ -3626,6 +3672,9 @@ var RP = (function() {
     toggleHT: toggleHT,
     toggleRandomize: toggleRandomize,
     randomizeRange: randomizeRange,
+    rzCallInput: rzCallInput,
+    rzRaiseInput: rzRaiseInput,
+    rzBetInput: rzBetInput,
     cancelRoom: cancelRoom,
     deselectAll: deselectAll,
     toggleSelectAll: toggleSelectAll,
