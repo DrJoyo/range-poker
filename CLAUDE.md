@@ -48,6 +48,8 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 
 **Street advance & showdown** — `advanceStreet()` records `prevLen = G.board.length`, pushes new cards onto `G.board`, then calls `renderBoard(prevLen)` so only the newly added cards animate in. When all streets are done or someone folds, `showdown()` / `foldWin()` populates the `#showdown-overlay` and calls `renderHole(pid, true)` to flip both players' hole cards face-up. All-in with cards to come calls `runOutBoard()` which deals remaining board cards then triggers `showdown()` after an 800 ms delay.
 
+**Range EV Split** — a setup-screen toggle (`cfg.evSplit`) that changes showdown pot award from "winner takes all based on dealt cards" to "split proportional to range equity". `computeRangeEV(board)` enumerates all valid combos from each player's `G.narrowed` set (or full range if `null`), pre-computes hand ranks for every combo via `evalHand`, then double-loops over all `(combo0, combo1)` pairs that share no card to tally wins/ties. Returns `{ ev0, ev1 }` fractions; `showdown()` awards `Math.round(ev0 * pot * 100) / 100` to player 0 and the remainder to player 1 (rounded to 0.01bb). The pre-computation of ranks outside the inner loop is critical — evaluating inside the inner loop causes O(N²) `evalHand` calls and freezes the page with large ranges. `cfg.evSplit` is written to `rooms/<code>/config` in Firebase so the guest receives it automatically.
+
 **Card reveal animation** — `renderBoard(newFrom)` applies a `ccReveal` CSS animation only to cards at index ≥ `newFrom`, with a 90 ms stagger per card (0 / 90 / 180 ms for the flop). Passing `null` (initial deal) skips animation entirely.
 
 **Range narrowing** — after a player submits, `G.narrowed[pid]` is set to the union of all combo keys that got assigned to the action they actually took. `initRange` checks this set on subsequent turns so grayed-out (eliminated) combos are excluded from the map entirely.
@@ -104,6 +106,7 @@ Firebase Realtime Database is used for peer-to-peer synchronization. The host (p
 
 ## Key invariants
 
+- `fmt(bb)` formats chip amounts as `+bb.toFixed(2)+'bb'` — the unary `+` strips trailing zeros so integers display as `100bb` not `100.00bb`. Bet presets and input clamping use `.toFixed(2)`; the bet-input `step` is `0.5` (arrow buttons) but accepts any decimal when typed. EV split awards round to `0.01bb`.
 - Opponent hole cards are **never** excluded from `initRange` (would leak info and reduce 1326→1225)
 - `G.narrowed` is reset to `[null, null]` only in `dealHand()`, not between streets
 - Suit filter (`suitFilter`) affects drag assignment and category selection but not category combo counts (counts scan all suits)
