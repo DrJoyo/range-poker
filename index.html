@@ -1022,9 +1022,13 @@ var RP = (function() {
   var currentHandN   = 0;  // hand sequence number, used to ignore stale actions
   var handSeqNum     = 0;  // incremented by host when writing each new hand
   var actionSeqNum   = 0;  // incremented by the active player on each submit
+  var hostLogSeqNum  = 0;  // host-only counter for action log keys (avoids collisions)
   var actionSeenKey  = ''; // "pid:n" of the last action processed from Firebase
   var remoteActionQueue      = [];   // actions waiting to be executed in order
   var processingRemoteAction = false;
+  var _isRejoin         = false; // true when guest is rejoining a hand in progress
+  var _replayingActions = false; // true while replaying action log on rejoin
+  var _replayFoldWinner = -1;   // set by replayAction on fold, read after replay
   var serverTimeOffset  = 0;    // ms delta: Date.now() + serverTimeOffset ≈ Firebase server time
   var turnSeqNum        = 0;    // incremented by host each startTurn
   var _lastSyncedTurnId = 0;    // turnId of the last currentTurn we synced a timer to
@@ -3271,6 +3275,7 @@ var RP = (function() {
         roomCode   = code;
         myPid      = 1;
         onlineMode = true;
+        _isRejoin    = true;
         currentHandN = 0;   // reset so hand listener fires immediately
         _lastSyncedTurnId = 0; _lastTurnData = null; // reset so timer sync fires
         setupHandListener();
@@ -3375,6 +3380,79 @@ var RP = (function() {
     });
   }
 
+  // ---- Silent replay helpers (used on rejoin to reconstruct mid-hand state) ----
+  function silentCollectBets() {
+    G.pot += G.bets[0] + G.bets[1];
+    G.bets = [0, 0]; G.curBetTo = 0; G.lastRaiseAmt = 0;
+  }
+
+  function silentAdvanceStreet() {
+    var order = ['preflop','flop','turn','river'];
+    var idx = order.indexOf(G.street);
+    silentCollectBets();
+    if (idx >= 3) { G.handOver = true; return; }
+    var next = order[idx + 1];
+    if (next === 'flop') { G.board.push(G.deck.pop(), G.deck.pop(), G.deck.pop()); }
+    else { G.board.push(G.deck.pop()); }
+    G.street = next;
+    G.streetChecked = [false, false]; G.streetActed = [false, false];
+    G.actPid = 1 - G.dealer; // BB acts first postflop
+  }
+
+  function silentRunOutBoard() {
+    while (G.board.length < 3) G.board.push(G.deck.pop());
+    if (G.board.length < 4) G.board.push(G.deck.pop());
+    if (G.board.length < 5) G.board.push(G.deck.pop());
+    G.handOver = true;
+  }
+
+  function replayAction(data) {
+    var pid = data.pid, action = data.action, betSz = data.betSz || 0, opp = 1 - pid;
+    G.narrowed[pid] = decodeNarrowed(data.narrowed);
+    G.streetActed[pid] = true;
+
+    if (action === 'fold') {
+      var pot = G.pot + G.bets[0] + G.bets[1];
+      G.stacks[opp] += pot; G.pot = 0; G.bets = [0, 0];
+      G.handOver = true; _replayFoldWinner = opp;
+      return;
+    }
+    if (action === 'check') {
+      G.streetChecked[pid] = true;
+      if (G.street === 'preflop') {
+        if (pid !== G.dealer) silentAdvanceStreet(); else G.actPid = opp;
+      } else {
+        if (G.streetChecked[opp]) silentAdvanceStreet(); else G.actPid = opp;
+      }
+      return;
+    }
+    if (action === 'call') {
+      var toCall = Math.min(G.curBetTo - G.bets[pid], G.stacks[pid]);
+      G.stacks[pid] -= toCall; G.bets[pid] += toCall;
+      if (G.stacks[pid] === 0 || G.stacks[opp] === 0) {
+        G.allIn = true; silentCollectBets(); silentRunOutBoard(); return;
+      }
+      if (G.street === 'preflop' && pid === G.dealer && G.lastRaiseAmt <= 1 && !G.streetActed[opp]) {
+        G.actPid = opp; return; // limp — BB gets option
+      }
+      silentAdvanceStreet(); return;
+    }
+    if (action === 'bet' || action === 'raise') {
+      var myBet = G.bets[pid], myStack = G.stacks[pid];
+      var effectiveMax = Math.min(myBet + myStack, G.bets[opp] + G.stacks[opp]);
+      var minTotal = G.curBetTo === 0 ? Math.max(1, betSz) : G.curBetTo + G.lastRaiseAmt;
+      var totalBet = Math.max(Math.min(betSz, effectiveMax), Math.min(minTotal, effectiveMax));
+      var paid = Math.min(totalBet - myBet, myStack);
+      G.stacks[pid] -= paid; G.bets[pid] += paid;
+      var raiseAmt = G.bets[pid] - G.curBetTo;
+      G.lastRaiseAmt = Math.max(raiseAmt, G.lastRaiseAmt);
+      G.curBetTo = G.bets[pid];
+      if (G.stacks[pid] === 0) G.allIn = true;
+      G.actPid = opp;
+      return;
+    }
+  }
+
   // ---- Apply hand state received from host ----
   function onRemoteHand(data) {
     remoteActionQueue      = [];
@@ -3397,11 +3475,53 @@ var RP = (function() {
 
     $('next-btn').style.display = 'none';
     buildChart(0); buildChart(1);
+
+    if (_isRejoin) {
+      _isRejoin = false;
+      _replayFoldWinner = -1;
+      _replayingActions = true; // block pendingAction listener until replay is done
+      // Set up initial hand state (mirrors startHandUI without startTurn)
+      G.board = [];
+      renderHole(0, debugMode); renderHole(1, debugMode);
+      renderBoard(); $('log').innerHTML = ''; updateUI();
+      postBlinds();
+      G.narrowed = [null, null];
+      initRange(0); initRange(1);
+      G.street = 'preflop';
+      G.streetChecked = [false, false]; G.streetActed = [false, false];
+      G.actPid = G.dealer;
+      // Fetch action log and replay silently
+      db.ref('rooms/'+roomCode+'/actions').once('value', function(snap) {
+        var acts = [];
+        if (snap.val()) snap.forEach(function(c) { acts.push(c.val()); });
+        // Sort by log key (numeric), not by per-player n, to get correct order
+        acts.sort(function(a, b) { return a._seq - b._seq; });
+        acts.forEach(replayAction);
+        // Sync dedup key to last replayed action so pendingAction doesn't replay it
+        if (acts.length > 0) {
+          var last = acts[acts.length - 1];
+          actionSeenKey = last.pid + ':' + last.n;
+        }
+        _replayingActions = false;
+        renderBoard(null);
+        colorChart(0, false); colorChart(1, false);
+        updateRangeSum(0); updateRangeSum(1); updateUI();
+        if (G.handOver) {
+          if (G.allIn) { renderHole(0,true); renderHole(1,true); showdown(); }
+          else { endHand(_replayFoldWinner, 'fold'); }
+        } else {
+          startTurn(G.actPid);
+        }
+      });
+      return;
+    }
+
     startHandUI();
   }
 
   // ---- Remote action queue (prevents race when two actions arrive before the first executes) ----
   function enqueueRemoteAction(data) {
+    if (_replayingActions) return; // action log replay handles past actions on rejoin
     remoteActionQueue.push(data);
     if (!processingRemoteAction) processNextRemoteAction();
   }
@@ -3422,6 +3542,13 @@ var RP = (function() {
     // processing the next queued action.
     setTimeout(function() {
       execAction(pid, data.action, data.betSz || 0);
+      // Host logs the opponent's action so the action log has a single authoritative
+      // sequence written by one client (avoids key collisions from both sides writing).
+      if (myPid === 0) {
+        var seq = ++hostLogSeqNum;
+        data._seq = seq;
+        db.ref('rooms/'+roomCode+'/actions/'+seq).set(data);
+      }
       setTimeout(processNextRemoteAction, 400);
     }, 350);
   }
@@ -3431,7 +3558,9 @@ var RP = (function() {
     handSeqNum++;
     currentHandN  = handSeqNum;
     actionSeqNum  = 0;
+    hostLogSeqNum = 0;
     actionSeenKey = '';
+    db.ref('rooms/'+roomCode+'/actions').remove();
     db.ref('rooms/'+roomCode+'/hand').set({
       n:       handSeqNum,
       dealer:  G.dealer,
@@ -3446,14 +3575,22 @@ var RP = (function() {
   // ---- Write action to Firebase (active player) ----
   function writeActionToFirebase(pid, action, betSz, narrowed) {
     actionSeqNum++;
-    db.ref('rooms/'+roomCode+'/pendingAction').set({
+    var entry = {
       handN:    currentHandN,
       n:        actionSeqNum,
       pid:      pid,
       action:   action,
       betSz:    betSz || 0,
       narrowed: encodeNarrowed(narrowed)
-    });
+    };
+    db.ref('rooms/'+roomCode+'/pendingAction').set(entry);
+    // Only host writes to the action log so there are no key collisions.
+    // Guest actions are logged by the host in processNextRemoteAction.
+    if (myPid === 0) {
+      var seq = ++hostLogSeqNum;
+      entry._seq = seq;
+      db.ref('rooms/'+roomCode+'/actions/'+seq).set(entry);
+    }
   }
 
   // ---- Copy share URL to clipboard ----
