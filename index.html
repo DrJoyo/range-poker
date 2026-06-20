@@ -766,6 +766,7 @@ body {
     <select class="gamemode-select" id="cfg-gamemode">
       <option value="nlhe">No Limit Hold'em</option>
       <option value="sd">Short Deck Hold'em</option>
+      <option value="cta">Crack the Aces</option>
     </select>
   </div>
 
@@ -1398,7 +1399,7 @@ var RP = (function() {
 
   function setActiveMode(mode) {
     activeMode  = mode;
-    activeGridN = mode==='sd' ? 9 : 13;
+    activeGridN = mode==='sd' ? 9 : 13; // cta uses 13 (nlhe base); BB chart is 1×1 via buildChart
     // Update timer bar widths to match chart width
     var barW = 'calc('+activeGridN+' * 37px + 16px)';
     document.querySelectorAll('.timer-bar').forEach(function(bar){ bar.style.width=barW; });
@@ -1498,16 +1499,30 @@ var RP = (function() {
     G.presetBoard = presetBoard.slice();
     var presetSet = new Set(G.presetBoard.filter(function(c){return c;}));
     if (presetSet.size) G.deck = G.deck.filter(function(c){return !presetSet.has(c);});
-    G.hole[0] = [G.deck.pop(), G.deck.pop()];
-    G.hole[1] = [G.deck.pop(), G.deck.pop()];
+    if (activeMode === 'cta') {
+      var ctaBB = 1 - G.dealer;
+      // Remove As and Ah from deck — they are pre-dealt to BB
+      G.deck = G.deck.filter(function(c){ return c !== 'As' && c !== 'Ah'; });
+      G.hole[ctaBB] = ['As', 'Ah'];
+      G.hole[G.dealer] = [G.deck.pop(), G.deck.pop()];
+      // Rebuild charts: BB gets 1×1 (only AA), SB gets full grid
+      buildChart(ctaBB, true);
+      buildChart(G.dealer, false);
+    } else {
+      G.hole[0] = [G.deck.pop(), G.deck.pop()];
+      G.hole[1] = [G.deck.pop(), G.deck.pop()];
+    }
     if (onlineMode) writeHandToFirebase();
     startHandUI();
   }
 
+  function ctaBBPid() { return activeMode === 'cta' ? 1 - G.dealer : -1; }
+
   function startHandUI() {
     G.board = [];
-    renderHole(0, debugMode);
-    renderHole(1, debugMode);
+    var bbP = ctaBBPid();
+    renderHole(0, debugMode || 0 === bbP);
+    renderHole(1, debugMode || 1 === bbP);
     renderBoard();
     $('log').innerHTML='';
     updateUI();
@@ -1629,6 +1644,13 @@ var RP = (function() {
     }
 
     renderChartListeners(pid);
+
+    // CTA: pre-select BB's only combo at the start of every turn
+    if (activeMode === 'cta' && pid === ctaBBPid()) {
+      filteredCombosForCell(pid, 0, 0).forEach(function(ck){ drag.cells.add(ck); });
+      refreshDragHighlight();
+    }
+
     showActionPanel(pid);
     setMsg(G.cfg.names[pid]+': assign hand ranges, then submit');
     startTimer(pid, function(){ submit(true); });
@@ -1658,6 +1680,24 @@ var RP = (function() {
           map[ck]=defAction;
         }
         G.ranges[pid][r][c]=map;
+      }
+    }
+    if (activeMode === 'cta') {
+      var bbP = ctaBBPid();
+      if (pid === bbP) {
+        // BB only ever holds AsAh — wipe everything else
+        for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) G.ranges[pid][r][c]={};
+        if (G.narrowed[pid]===null || G.narrowed[pid].has('AsAh'))
+          G.ranges[pid][0][0]['AsAh'] = defAction;
+      } else {
+        // SB: remove every combo that contains As or Ah (those cards are not in the deck)
+        for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
+          var map=G.ranges[pid][r][c];
+          for (var ck in map) {
+            var d1=ck.slice(0,2), d2=ck.slice(2,4);
+            if (d1==='As'||d1==='Ah'||d2==='As'||d2==='Ah') delete map[ck];
+          }
+        }
       }
     }
   }
@@ -2063,12 +2103,13 @@ var RP = (function() {
   }
 
   // Build chart cells (once per hand)
-  function buildChart(pid) {
+  function buildChart(pid, isCTABB) {
     var chart=$('chart'+pid);
-    chart.style.gridTemplateColumns='repeat('+activeGridN+', 37px)';
-    chart.style.gridTemplateRows='repeat('+activeGridN+', 47px)';
+    var n = isCTABB ? 1 : activeGridN;
+    chart.style.gridTemplateColumns='repeat('+n+', 37px)';
+    chart.style.gridTemplateRows='repeat('+n+', 47px)';
     chart.innerHTML='';
-    for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
+    for (var r=0;r<n;r++) for (var c=0;c<n;c++) {
       var cell=document.createElement('div');
       cell.className='hc';
       cell.dataset.r=r; cell.dataset.c=c;
@@ -2825,7 +2866,8 @@ var RP = (function() {
       makeABtn('Fold','fold','aBtn-fold');
     }
     var facingAllIn = G.stacks[1-pid] === 0 || (facing && toCall >= G.stacks[pid]);
-    if (!facingAllIn) {
+    var ctaBBPreflop = activeMode === 'cta' && pid === ctaBBPid() && G.street === 'preflop';
+    if (!facingAllIn && !ctaBBPreflop) {
       if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
       else makeABtn('Raise','raise','aBtn-raise');
     }
@@ -4084,6 +4126,7 @@ var RP = (function() {
 
     $('next-btn').style.display = 'none';
     buildChart(0); buildChart(1);
+    if (activeMode === 'cta') buildChart(1 - G.dealer, true); // BB gets 1×1 chart
 
     if (_isRejoin) {
       _isRejoin = false;
@@ -4091,7 +4134,8 @@ var RP = (function() {
       _replayingActions = true; // block pendingAction listener until replay is done
       // Set up initial hand state (mirrors startHandUI without startTurn)
       G.board = [];
-      renderHole(0, debugMode); renderHole(1, debugMode);
+      var rejoinBbP = ctaBBPid();
+      renderHole(0, debugMode || 0 === rejoinBbP); renderHole(1, debugMode || 1 === rejoinBbP);
       renderBoard(); $('log').innerHTML = ''; updateUI();
       postBlinds();
       G.narrowed = [null, null];

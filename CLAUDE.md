@@ -9,6 +9,7 @@ Heads-up range poker trainer supporting multiple game modes. Players don't know 
 **Supported game modes** (selected via `#cfg-gamemode` dropdown on the start screen):
 - **No Limit Hold'em** (`nlhe`) — standard 52-card deck, 13×13 hand chart, 1326 combos
 - **Short Deck Hold'em** (`sd`) — 36-card deck (6 and higher), 9×9 hand chart, 630 combos; Flush beats Full House; A plays low in A-6-7-8-9 straight
+- **Crack the Aces** (`cta`) — NLHE rules; BB is always dealt As+Ah face-up (visible to both players); SB's range auto-excludes all As/Ah combos; BB's chart is a 1×1 grid showing only the AA cell (with just the AsAh combo); BB cannot raise preflop (Call/Fold only, or Check when SB limps); BB's AA cell is auto-selected at the start of each preflop turn
 
 ## Running the app
 
@@ -24,7 +25,7 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 
 **Constants** — `RANKS`, `SUITS`, `RVAL`, `SUITED_SUITS`, `OFFSUIT_SUITS`, `PAIR_SUITS`, `suitFilter`; `RANKS_SD` (`['A','K','Q','J','T','9','8','7','6']`) for Short Deck
 
-**Mode globals** — `activeMode` (`'nlhe'` | `'sd'`), `activeGridN` (13 or 9). Set by `setActiveMode(mode)` which also updates the `.timer-bar` inline `width` style. Always call `setActiveMode` before `newMatch` when the game mode changes. Never hardcode `13` in loops over the grid — use `activeGridN`.
+**Mode globals** — `activeMode` (`'nlhe'` | `'sd'` | `'cta'`), `activeGridN` (9 for SD, 13 for NLHE/CTA). Set by `setActiveMode(mode)`. CTA uses `activeGridN=13` (NLHE base); BB's 1×1 chart is a visual-only override via `buildChart(pid, isCTABB=true)`. Helper `ctaBBPid()` returns `1 - G.dealer` in CTA mode, or `-1` otherwise — use it anywhere BB's special treatment is needed.
 
 **Game state (`G`)** — single mutable object created by `newMatch()`. Key fields:
 - `ranges[pid][r][c]` — map of `comboKey → action` for every cell in the `activeGridN×activeGridN` chart
