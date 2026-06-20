@@ -2061,9 +2061,19 @@ var RP = (function() {
     var rc={}, sc={s:0,h:0,d:0,c:0};
     for(var card of board){ var rk=cRank(card), sk=cSuit(card); rc[rk]=(rc[rk]||0)+1; sc[sk]++; }
     var ur=Object.keys(rc).sort(function(a,b){return RVAL[b]-RVAL[a];});
+    var rcVals=Object.values(rc);
+    var hasBoardTrips=rcVals.some(function(c){return c===3;});
+    var hasBoardFH=hasBoardTrips&&rcVals.some(function(c){return c===2;});
+    var hasBoardQuads=rcVals.some(function(c){return c>=4;});
+    var pairedRanks=Object.keys(rc).filter(function(r){return rc[r]>=2;}).sort(function(a,b){return RVAL[a]-RVAL[b];});
+    var isDoublePaired=pairedRanks.length===2&&!hasBoardTrips&&!hasBoardQuads;
+    var lowestPairedRankVal=pairedRanks.length>0?RVAL[pairedRanks[0]]:0;
+    var boardScore=hasBoardFH&&board.length>=5?evalHand(board).rank:0;
     return {rankCounts:rc, suitCounts:sc, uniqueRanks:ur,
-            isPaired:Object.values(rc).some(function(c){return c>=2;}),
-            topRankVal:ur.length>0?RVAL[ur[0]]:0};
+            isPaired:rcVals.some(function(c){return c>=2;}),
+            topRankVal:ur.length>0?RVAL[ur[0]]:0,
+            hasBoardTrips:hasBoardTrips, hasBoardFH:hasBoardFH, hasBoardQuads:hasBoardQuads,
+            isDoublePaired:isDoublePaired, lowestPairedRankVal:lowestPairedRankVal, boardScore:boardScore};
   }
 
   function hasStraightRanks(rvArr) {
@@ -2122,6 +2132,7 @@ var RP = (function() {
   function isUnderpair(c1,c2,ba) {
     var r1=cRank(c1),r2=cRank(c2);
     if(r1!==r2||ba.rankCounts[r1]) return false;
+    if(ba.isDoublePaired&&RVAL[r1]<=ba.lowestPairedRankVal) return false;
     return RVAL[r1]<ba.topRankVal;
   }
 
@@ -2192,13 +2203,31 @@ var RP = (function() {
       case 'twopair':   return isTwoPair(c1,c2,ba);
       case 'set':       return isSet(c1,c2,ba);
       case 'trips':     return handTier(c1,c2,board)===3;
-      case 'fullhouse': return handTier(c1,c2,board)===6;
+      case 'fullhouse': {
+        if(ba.hasBoardFH){
+          var fhScore=evalHand([c1,c2].concat(board)).rank;
+          return fhScore>=6e8&&fhScore<7e8&&fhScore>ba.boardScore;
+        }
+        return handTier(c1,c2,board)===6;
+      }
       case 'quads':     return handTier(c1,c2,board)===7;
       case 'nothing': {
+        if(ba.hasBoardQuads) return true;
+        if(ba.hasBoardFH){
+          var nScore=evalHand([c1,c2].concat(board)).rank;
+          return nScore<7e8&&nScore<=ba.boardScore;
+        }
         var isRiv=board&&board.length===5;
         var allIds=['flush','straightflush','straight','pair0','pair1','pair2','pair3','pair4',
-                    'overpair','underpair','twopair','set','trips','fullhouse','quads'];
+                    'overpair','underpair','twopair','set','fullhouse','quads'];
+        // trips is not a shown category on trips boards or double-paired boards
+        if(!ba.hasBoardTrips&&!ba.isDoublePaired) allIds.push('trips');
         if(!isRiv) allIds.push('flushdraw','oesd','gutshot');
+        if(ba.isDoublePaired){
+          // exclude pair category for lowest unpaired card (counterfeit on double-paired boards)
+          var urLo=ba.uniqueRanks.filter(function(r){return ba.rankCounts[r]===1&&RVAL[r]<ba.lowestPairedRankVal;});
+          if(urLo.length>0){var loIdx=ba.uniqueRanks.indexOf(urLo[0]);allIds=allIds.filter(function(id){return id!=='pair'+loIdx;});}
+        }
         return allIds.every(function(id){ return !matchesCategory(c1,c2,id,ba,board); });
       }
       default: return false;
@@ -2209,42 +2238,136 @@ var RP = (function() {
     if(!board||board.length===0) return [];
     var ba=boardAnalysis(board);
     var isRiver=board.length===5;
-
     var counts={flush:0,straightflush:0,straight:0,p0:0,p1:0,p2:0,p3:0,p4:0,
                 overpair:0,underpair:0,flushdraw:0,oesd:0,gutshot:0,
                 twopair:0,set:0,trips:0,fullhouse:0,quads:0,nothing:0};
-
-    var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};})
-                        .filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
     var checkFlush=Object.values(ba.suitCounts).some(function(c){return c>=3;});
     var checkSt=isStraightPossible(ba);
     var checkFD=!isRiver&&Object.values(ba.suitCounts).some(function(c){return c>=2;});
     var checkDr=!isRiver&&isDrawPossible(ba);
+    var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
 
-    for(var row=0;row<13;row++) for(var col=0;col<13;col++){
-      var map=G.ranges[pid][row][col];
-      var type=cellType(row,col);
-      for(var suit of typeSuits(type)){
-        var ck=htSuitKey(row,col,suit);
-        if(!(ck in map)) continue;
-        var c1=ck.slice(0,2),c2=ck.slice(2,4);
-        var _any=false;
-        if(checkFlush&&isFlushHand(c1,c2,ba)){counts.flush++;_any=true;}
-        if(checkFlush&&checkSt&&handTier(c1,c2,board)===8){counts.straightflush++;_any=true;}
-        if(checkSt&&isStraightHand(c1,c2,board)){counts.straight++;_any=true;}
-        for(var pp of validPairIdxs) if(isPairAtRank(c1,c2,pp.r,ba)){counts['p'+pp.i]++;_any=true;}
-        if(ba.topRankVal<14&&isOverpair(c1,c2,ba)){counts.overpair++;_any=true;}
-        if(ba.uniqueRanks.length>0&&isUnderpair(c1,c2,ba)){counts.underpair++;_any=true;}
-        if(checkFD&&isFlushDraw(c1,c2,ba)){counts.flushdraw++;_any=true;}
-        if(checkDr){var dt=getStraightDrawType(c1,c2,board);if(dt){if(dt.oesd){counts.oesd++;_any=true;}if(dt.gutshot){counts.gutshot++;_any=true;}}}
-        if(!ba.isPaired){if(isTwoPair(c1,c2,ba)){counts.twopair++;_any=true;}if(isSet(c1,c2,ba)){counts.set++;_any=true;}}
-        if(ba.isPaired){var t=handTier(c1,c2,board);if(t===3){counts.trips++;_any=true;}else if(t===6){counts.fullhouse++;_any=true;}else if(t===7){counts.quads++;_any=true;}}
-        if(!_any) counts.nothing++;
+    // All combos in current range → callback(c1, c2)
+    function eachCombo(fn) {
+      for(var row=0;row<13;row++) for(var col=0;col<13;col++){
+        var map=G.ranges[pid][row][col];
+        var type=cellType(row,col);
+        for(var suit of typeSuits(type)){
+          var ck=htSuitKey(row,col,suit);
+          if(ck in map) fn(ck.slice(0,2),ck.slice(2,4));
+        }
       }
     }
 
+    // --- QUADS BOARD: all nothing ---
+    if(ba.hasBoardQuads){
+      eachCombo(function(){counts.nothing++;});
+      return counts.nothing>0?[{id:'nothing',label:'Nothing',n:counts.nothing}]:[];
+    }
+
+    // --- FULL HOUSE BOARD: quads → stronger FH → nothing ---
+    if(ba.hasBoardFH){
+      eachCombo(function(c1,c2){
+        var score=evalHand([c1,c2].concat(board)).rank;
+        if(score>=7e8) counts.quads++;
+        else if(score>=6e8&&score>ba.boardScore) counts.fullhouse++;
+        else counts.nothing++;
+      });
+      var cats=[];
+      if(counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
+      if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      if(counts.nothing>0) cats.push({id:'nothing',label:'Nothing',n:counts.nothing});
+      return cats;
+    }
+
+    // --- TRIPS BOARD: SF → quads → FH → flush → straight → draws → nothing ---
+    if(ba.hasBoardTrips){
+      eachCombo(function(c1,c2){
+        var _any=false;
+        var t=handTier(c1,c2,board);
+        if(checkFlush&&checkSt&&t===8){counts.straightflush++;_any=true;}
+        if(t===7){counts.quads++;_any=true;}
+        if(t===6){counts.fullhouse++;_any=true;}
+        if(checkFlush&&isFlushHand(c1,c2,ba)){counts.flush++;_any=true;}
+        if(checkSt&&isStraightHand(c1,c2,board)){counts.straight++;_any=true;}
+        if(checkFD&&isFlushDraw(c1,c2,ba)){counts.flushdraw++;_any=true;}
+        if(checkDr){var dt=getStraightDrawType(c1,c2,board);if(dt){if(dt.oesd){counts.oesd++;_any=true;}if(dt.gutshot){counts.gutshot++;_any=true;}}}
+        if(!_any) counts.nothing++;
+      });
+      var cats=[];
+      if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
+      if(counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
+      if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
+      if(!isRiver&&counts.flushdraw>0) cats.push({id:'flushdraw',label:'Flush Draw',n:counts.flushdraw});
+      if(!isRiver&&counts.oesd>0) cats.push({id:'oesd',label:'OESD',n:counts.oesd});
+      if(!isRiver&&counts.gutshot>0) cats.push({id:'gutshot',label:'Gutshot',n:counts.gutshot});
+      if(counts.nothing>0) cats.push({id:'nothing',label:'Nothing',n:counts.nothing});
+      return cats;
+    }
+
+    // --- DOUBLE PAIRED BOARD: SF → quads → FH → flush → straight → single pair → draws → nothing ---
+    if(ba.isDoublePaired){
+      // Unpaired card: there is 0 or 1 rank with count===1
+      var unpairedRanks=ba.uniqueRanks.filter(function(r){return ba.rankCounts[r]===1;});
+      var unpairedRank=unpairedRanks.length>0?unpairedRanks[0]:null; // highest since sorted desc
+      // Show pair category only if unpaired card exists AND is not the lowest board card
+      var unpairedIsLowest=unpairedRank&&RVAL[unpairedRank]<ba.lowestPairedRankVal;
+      var showPairCat=unpairedRank&&!unpairedIsLowest;
+      var pairCatIdx=showPairCat?ba.uniqueRanks.indexOf(unpairedRank):-1;
+
+      eachCombo(function(c1,c2){
+        var _any=false;
+        var t=handTier(c1,c2,board);
+        if(checkFlush&&checkSt&&t===8){counts.straightflush++;_any=true;}
+        if(t===7){counts.quads++;_any=true;}
+        if(t===6){counts.fullhouse++;_any=true;}
+        if(checkFlush&&isFlushHand(c1,c2,ba)){counts.flush++;_any=true;}
+        if(checkSt&&isStraightHand(c1,c2,board)){counts.straight++;_any=true;}
+        if(showPairCat&&isPairAtRank(c1,c2,unpairedRank,ba)){counts['p'+pairCatIdx]++;_any=true;}
+        if(ba.topRankVal<14&&isOverpair(c1,c2,ba)){counts.overpair++;_any=true;}
+        if(isUnderpair(c1,c2,ba)){counts.underpair++;_any=true;}
+        if(checkFD&&isFlushDraw(c1,c2,ba)){counts.flushdraw++;_any=true;}
+        if(checkDr){var dt=getStraightDrawType(c1,c2,board);if(dt){if(dt.oesd){counts.oesd++;_any=true;}if(dt.gutshot){counts.gutshot++;_any=true;}}}
+        if(!_any) counts.nothing++;
+      });
+      var cats=[];
+      if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
+      if(counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
+      if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
+      if(counts.overpair>0) cats.push({id:'overpair',label:'Overpair',n:counts.overpair});
+      if(showPairCat&&counts['p'+pairCatIdx]>0) cats.push({id:'pair'+pairCatIdx,label:pnames[pairCatIdx],n:counts['p'+pairCatIdx]});
+      if(counts.underpair>0) cats.push({id:'underpair',label:'Underpair',n:counts.underpair});
+      if(!isRiver&&counts.flushdraw>0) cats.push({id:'flushdraw',label:'Flush Draw',n:counts.flushdraw});
+      if(!isRiver&&counts.oesd>0) cats.push({id:'oesd',label:'OESD',n:counts.oesd});
+      if(!isRiver&&counts.gutshot>0) cats.push({id:'gutshot',label:'Gutshot',n:counts.gutshot});
+      if(counts.nothing>0) cats.push({id:'nothing',label:'Nothing',n:counts.nothing});
+      return cats;
+    }
+
+    // --- SINGLE-PAIRED or UNPAIRED (existing logic) ---
+    var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};})
+                        .filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
+
+    eachCombo(function(c1,c2){
+      var _any=false;
+      if(checkFlush&&isFlushHand(c1,c2,ba)){counts.flush++;_any=true;}
+      if(checkFlush&&checkSt&&handTier(c1,c2,board)===8){counts.straightflush++;_any=true;}
+      if(checkSt&&isStraightHand(c1,c2,board)){counts.straight++;_any=true;}
+      for(var pp of validPairIdxs) if(isPairAtRank(c1,c2,pp.r,ba)){counts['p'+pp.i]++;_any=true;}
+      if(ba.topRankVal<14&&isOverpair(c1,c2,ba)){counts.overpair++;_any=true;}
+      if(ba.uniqueRanks.length>0&&isUnderpair(c1,c2,ba)){counts.underpair++;_any=true;}
+      if(checkFD&&isFlushDraw(c1,c2,ba)){counts.flushdraw++;_any=true;}
+      if(checkDr){var dt=getStraightDrawType(c1,c2,board);if(dt){if(dt.oesd){counts.oesd++;_any=true;}if(dt.gutshot){counts.gutshot++;_any=true;}}}
+      if(!ba.isPaired){if(isTwoPair(c1,c2,ba)){counts.twopair++;_any=true;}if(isSet(c1,c2,ba)){counts.set++;_any=true;}}
+      if(ba.isPaired){var t=handTier(c1,c2,board);if(t===3){counts.trips++;_any=true;}else if(t===6){counts.fullhouse++;_any=true;}else if(t===7){counts.quads++;_any=true;}}
+      if(!_any) counts.nothing++;
+    });
+
     var cats=[];
-    var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
     if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
     if(ba.isPaired&&counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
     if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
