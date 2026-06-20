@@ -445,6 +445,17 @@ body {
 #strength-popup { display: none; position: fixed; background: #1e1e1e; border: 1px solid #444; border-radius: 6px; padding: 10px; z-index: 1000; flex-direction: column; gap: 6px; width: 70vw; max-width: 900px; min-width: 400px; cursor: default; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }
 #strength-popup.visible { display: flex; }
 #strength-popup .strength-bar { height: 120px; cursor: default; }
+#strength-tooltip { display: none; position: absolute; background: #333; color: #eee; font-size: 0.72em; padding: 3px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; z-index: 10; transform: translateX(-50%); }
+#strength-tooltip.visible { display: block; }
+#strength-popup .strength-bar > div.sg-dim { opacity: 0.5; }
+#strength-stats { display: none; justify-content: space-between; padding-top: 6px; border-top: 1px solid #333; font-size: 0.7em; gap: 8px; }
+.ss-col { display: flex; flex-direction: column; gap: 3px; }
+.ss-freqs { display: flex; gap: 8px; flex-wrap: wrap; }
+.ss-hdr { color: #888; white-space: nowrap; }
+.ss-fold { color: #6a9fc0; }
+.ss-passive { color: #4ab870; }
+.ss-aggr { color: #c0614e; }
+.ss-nir { color: #555; }
 
 .range-slots { display: flex; flex-direction: column; gap: 4px; width: 102px; flex-shrink: 0; padding-top: 181px; }
 .rs-hdr { font-size: 0.78em; color: #fff; text-align: center; line-height: 1.3; margin-bottom: 1px; letter-spacing: 0.02em; }
@@ -1650,6 +1661,62 @@ var RP = (function() {
     }
   }
 
+  function computeSplitFreqs(pid, gidx) {
+    var isActive=(pid===G.actPid);
+    var facing=isFacing(pid);
+    var total=0;
+    comboStrengthGroups.forEach(function(g){ total+=g.combos.length; });
+    var left={fold:0,passive:0,aggr:0,inrange:0,notInRange:0,total:0};
+    var right={fold:0,passive:0,aggr:0,inrange:0,notInRange:0,total:0};
+    comboStrengthGroups.forEach(function(group,gi){
+      var side=gi<=gidx?left:right;
+      side.total+=group.combos.length;
+      group.combos.forEach(function(ck){
+        var rc=comboToRC(ck);
+        var inNarrowed=G.narrowed[pid]===null||(G.narrowed[pid]&&G.narrowed[pid].has(ck));
+        if (isActive&&G.ranges[pid]) {
+          var cmap=G.ranges[pid][rc.r][rc.c];
+          if (ck in cmap) {
+            var action=cmap[ck]||(facing?'fold':'check');
+            if (action==='raise'||action==='bet') side.aggr++;
+            else if (action==='call'||action==='check') side.passive++;
+            else side.fold++;
+          } else { side.notInRange++; }
+        } else {
+          if (inNarrowed) side.inrange++; else side.notInRange++;
+        }
+      });
+    });
+    return {left:left,right:right,total:total,isActive:isActive,facing:facing};
+  }
+
+  function renderSplitStats(pid, gidx) {
+    var stats=$('strength-stats');
+    if (!stats) return;
+    var d=computeSplitFreqs(pid,gidx);
+    function sideHtml(s,isLeft) {
+      var hdr=isLeft
+        ? '<div class="ss-hdr">&#8592; Weaker ('+s.total+')</div>'
+        : '<div class="ss-hdr">Stronger ('+s.total+') &#8594;</div>';
+      var parts=[];
+      if (d.isActive) {
+        var passLbl=d.facing?'Call':'Check';
+        var aggrLbl=d.facing?'Raise':'Bet';
+        parts.push('<span class="ss-fold">Fold '+s.fold+'</span>');
+        parts.push('<span class="ss-passive">'+passLbl+' '+s.passive+'</span>');
+        if (!d.facing||s.aggr) parts.push('<span class="ss-aggr">'+aggrLbl+' '+s.aggr+'</span>');
+        if (s.notInRange) parts.push('<span class="ss-nir">Not In Range '+s.notInRange+'</span>');
+      } else {
+        parts.push('<span class="ss-passive">In Range '+s.inrange+'</span>');
+        parts.push('<span class="ss-nir">Not In Range '+s.notInRange+'</span>');
+      }
+      return '<div class="ss-col">'+hdr+'<div class="ss-freqs">'+parts.join('')+'</div></div>';
+    }
+    stats.innerHTML=sideHtml(d.left,true)+sideHtml(d.right,false);
+    stats.style.display='flex';
+  }
+
+  var strengthTooltipReady=false;
   function toggleStrengthEnlarge(e) {
     var popup=$('strength-popup');
     if (popup.classList.contains('visible')) return;
@@ -1665,8 +1732,45 @@ var RP = (function() {
     if (top+250>window.innerHeight) top=rect.top-250-8;
     popup.style.left=left+'px';
     popup.style.top=top+'px';
+    if (!strengthTooltipReady) {
+      strengthTooltipReady=true;
+      var tip=$('strength-tooltip');
+      var lastKey=null;
+      function onBarMove(ev) {
+        var col=ev.target.closest?ev.target.closest('[data-label]'):null;
+        if (!col) { tip.classList.remove('visible'); clearDim(); lastKey=null; var st=$('strength-stats'); if(st) st.style.display='none'; return; }
+        var lbl=col.dataset.label;
+        var gidx=parseInt(col.dataset.gidx,10);
+        var pid=ev.currentTarget.id==='sbar0-lg'?0:1;
+        tip.textContent=lbl;
+        tip.classList.add('visible');
+        var pr=popup.getBoundingClientRect();
+        tip.style.left=(ev.clientX-pr.left)+'px';
+        tip.style.top=(ev.clientY-pr.top-32)+'px';
+        var key=pid+':'+gidx;
+        if (key!==lastKey) { applyDim(lbl); renderSplitStats(pid,gidx); lastKey=key; }
+      }
+      function applyDim(lbl) {
+        popup.querySelectorAll('[data-label]').forEach(function(c){
+          c.classList.toggle('sg-dim', c.dataset.label!==lbl);
+        });
+      }
+      function clearDim() {
+        popup.querySelectorAll('[data-label]').forEach(function(c){ c.classList.remove('sg-dim'); });
+      }
+      function onBarLeave() {
+        tip.classList.remove('visible'); clearDim(); lastKey=null;
+        var st=$('strength-stats'); if(st) st.style.display='none';
+      }
+      [$('sbar0-lg'),$('sbar1-lg')].forEach(function(b){
+        b.addEventListener('mousemove',onBarMove);
+        b.addEventListener('mouseleave',onBarLeave);
+      });
+    }
     function dismiss() {
       popup.classList.remove('visible');
+      $('strength-tooltip').classList.remove('visible');
+      var st=$('strength-stats'); if(st) st.style.display='none';
       document.removeEventListener('click', dismiss);
     }
     document.addEventListener('click', dismiss);
@@ -1688,6 +1792,69 @@ var RP = (function() {
     if (ri1===ri2) return {r:ri1,c:ri1};
     if (s1===s2) return {r:Math.min(ri1,ri2),c:Math.max(ri1,ri2)};
     return {r:Math.max(ri1,ri2),c:Math.min(ri1,ri2)};
+  }
+
+  function comboLabel(c1, c2, ba, board) {
+    var isRiver=board.length===5;
+    var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
+    if (ba.hasBoardQuads) return 'Nothing';
+    if (ba.hasBoardFH) {
+      var s=evalHand([c1,c2].concat(board)).rank;
+      if (s>=7e8) return 'Quads';
+      if (s>=6e8&&s>ba.boardScore) return 'Full House';
+      return 'Nothing';
+    }
+    var checkFlush=Object.values(ba.suitCounts).some(function(c){return c>=3;});
+    var checkSt=isStraightPossible(ba);
+    var checkFD=!isRiver&&Object.values(ba.suitCounts).some(function(c){return c>=2;});
+    var checkDr=!isRiver&&isDrawPossible(ba);
+    var matched=[];
+    if (ba.hasBoardTrips) {
+      var t=handTier(c1,c2,board);
+      if (checkFlush&&checkSt&&t===8) matched.push('Str. Flush');
+      if (t===7) matched.push('Quads');
+      if (t===6) matched.push('Full House');
+      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
+      if (checkFD&&isFlushDraw(c1,c2,ba)) matched.push('Flush Draw');
+      if (checkDr) { var dt=getStraightDrawType(c1,c2,board); if(dt&&dt.oesd) matched.push('OESD'); if(dt&&dt.gutshot) matched.push('Gutshot'); }
+    } else if (ba.isDoublePaired) {
+      var unpairedRanks=ba.uniqueRanks.filter(function(r){return ba.rankCounts[r]===1;});
+      var unpairedRank=unpairedRanks.length>0?unpairedRanks[0]:null;
+      var showPairCat=unpairedRank&&RVAL[unpairedRank]>=ba.lowestPairedRankVal;
+      var pairCatIdx=showPairCat?ba.uniqueRanks.indexOf(unpairedRank):-1;
+      var t2=handTier(c1,c2,board);
+      if (checkFlush&&checkSt&&t2===8) matched.push('Str. Flush');
+      if (t2===7) matched.push('Quads');
+      if (t2===6) matched.push('Full House');
+      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
+      if (showPairCat&&isPairAtRank(c1,c2,unpairedRank,ba)) matched.push(pnames[pairCatIdx]);
+      if (ba.topRankVal<14&&isOverpair(c1,c2,ba)) matched.push('Overpair');
+      if (isUnderpair(c1,c2,ba)) matched.push('Underpair');
+      if (checkFD&&isFlushDraw(c1,c2,ba)) matched.push('Flush Draw');
+      if (checkDr) { var dt2=getStraightDrawType(c1,c2,board); if(dt2&&dt2.oesd) matched.push('OESD'); if(dt2&&dt2.gutshot) matched.push('Gutshot'); }
+    } else {
+      var t3=handTier(c1,c2,board);
+      if (checkFlush&&checkSt&&t3===8) matched.push('Str. Flush');
+      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
+      if (ba.isPaired) {
+        if (t3===7) matched.push('Quads');
+        else if (t3===6) matched.push('Full House');
+        else if (t3===3) matched.push('Trips');
+      } else {
+        if (isSet(c1,c2,ba)) matched.push('Set');
+        if (isTwoPair(c1,c2,ba)) matched.push('Two Pair');
+      }
+      if (ba.topRankVal<14&&isOverpair(c1,c2,ba)) matched.push('Overpair');
+      var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};}).filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
+      validPairIdxs.forEach(function(pp){ if(isPairAtRank(c1,c2,pp.r,ba)) matched.push(pnames[pp.i]); });
+      if (ba.uniqueRanks.length>0&&isUnderpair(c1,c2,ba)) matched.push('Underpair');
+      if (checkFD&&isFlushDraw(c1,c2,ba)) matched.push('Flush Draw');
+      if (checkDr) { var dt3=getStraightDrawType(c1,c2,board); if(dt3&&dt3.oesd) matched.push('OESD'); if(dt3&&dt3.gutshot) matched.push('Gutshot'); }
+    }
+    return matched.length>0?matched.join(' + '):'Nothing';
   }
 
   function buildComboStrengthIndex() {
@@ -1715,6 +1882,11 @@ var RP = (function() {
       while (i<scored.length&&scored[i].score===s) { combos.push(scored[i].ck); i++; }
       groups.push({score:s,combos:combos});
     }
+    var ba=boardAnalysis(G.board);
+    groups.forEach(function(group){
+      var ck=group.combos[0];
+      group.label=comboLabel(ck.slice(0,2),ck.slice(2,4),ba,G.board);
+    });
     comboStrengthGroups=groups;
   }
 
@@ -1723,23 +1895,28 @@ var RP = (function() {
       var barEl=p===0?bar0:bar1;
       if (!barEl) continue;
       var isActive=(p===G.actPid);
+      var facing=isFacing(p);
       var html='';
-      comboStrengthGroups.forEach(function(group){
-        var raiseN=0,callN=0,foldN=0,unassignedN=0,notInRangeN=0,inrangeN=0;
+      comboStrengthGroups.forEach(function(group,gi){
+        var raiseN=0,callN=0,foldN=0,notInRangeN=0,inrangeN=0;
         group.combos.forEach(function(ck){
           var rc=comboToRC(ck);
-          var action=isActive&&G.ranges[p] ? G.ranges[p][rc.r][rc.c][ck] : null;
           var inNarrowed=G.narrowed[p]===null||(G.narrowed[p]&&G.narrowed[p].has(ck));
-          if (action==='raise'||action==='bet') raiseN++;
-          else if (action==='call'||action==='check') callN++;
-          else if (action==='fold') foldN++;
-          else if (inNarrowed) { if (isActive) unassignedN++; else inrangeN++; }
-          else notInRangeN++;
+          if (isActive&&G.ranges[p]) {
+            var map=G.ranges[p][rc.r][rc.c];
+            if (ck in map) {
+              var action=map[ck]||(facing?'fold':'check');
+              if (action==='raise'||action==='bet') raiseN++;
+              else if (action==='call'||action==='check') callN++;
+              else foldN++;
+            } else { notInRangeN++; }
+          } else {
+            if (inNarrowed) inrangeN++; else notInRangeN++;
+          }
         });
         var inner='';
         if (isActive) {
           if (notInRangeN) inner+='<div style="flex:'+notInRangeN+';background:#111"></div>';
-          if (unassignedN) inner+='<div style="flex:'+unassignedN+';background:#444"></div>';
           if (foldN)       inner+='<div style="flex:'+foldN+';background:#2d5070"></div>';
           if (callN)       inner+='<div style="flex:'+callN+';background:#1a8a44"></div>';
           if (raiseN)      inner+='<div style="flex:'+raiseN+';background:#922b21"></div>';
@@ -1747,7 +1924,7 @@ var RP = (function() {
           if (notInRangeN) inner+='<div style="flex:'+notInRangeN+';background:#111"></div>';
           if (inrangeN)    inner+='<div style="flex:'+inrangeN+';background:#666"></div>';
         }
-        html+='<div style="flex:'+group.combos.length+';display:flex;flex-direction:column;overflow:hidden">'+inner+'</div>';
+        html+='<div data-label="'+group.label+'" data-gidx="'+gi+'" style="flex:'+group.combos.length+';display:flex;flex-direction:column;overflow:hidden">'+inner+'</div>';
       });
       barEl.innerHTML=html;
     }
@@ -3916,6 +4093,8 @@ document.addEventListener('DOMContentLoaded', function(){
 <div id="strength-popup">
   <div class="strength-bar" id="sbar0-lg"></div>
   <div class="strength-bar" id="sbar1-lg"></div>
+  <div id="strength-stats"></div>
+  <div id="strength-tooltip"></div>
 </div>
 </body>
 </html>

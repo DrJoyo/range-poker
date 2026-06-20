@@ -30,6 +30,7 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 - `streetChecked[pid]` — tracks whether each player checked this street; both `true` triggers `advanceStreet()`
 - `streetActed[pid]` — tracks whether each player has acted this street (used for preflop limp/BB-option logic)
 - `actPid`, `street`, `curBetTo`, `lastRaiseAmt`, `bets`, `pot`, `stacks`
+- `presetBoard` — snapshot of the module-level `presetBoard` array taken at `dealHand()`; used by `advanceStreet()` and `runOutBoard()` to override deck draws with specific cards (debug mode only)
 
 **Hand chart representation**
 - The 13×13 grid: `r < c` = suited, `r > c` = offsuit, `r === c` = pairs (ranks indexed 0=A … 12=2)
@@ -60,9 +61,32 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 
 **Hand evaluator** — `evalHand(cards)` picks best 5 from 7 (or 6) cards via `eval5`. Rank thresholds: SF≥8e8, Quads≥7e8, FH≥6e8, Flush≥5e8, Straight≥4e8, Trips≥3e8, TwoPair≥2e8, Pair≥1e8. Tiebreakers are packed into the lower digits (base-15 positional for flush/high-card; rank×multiplier for made hands).
 
-**Hand type categories** — `boardAnalysis(board)` computes rank/suit counts. `getHandCategories(pid, board)` returns visible category buttons with combo counts; straight/flush draws are suppressed on the river and when not structurally possible on the board. OESD vs gutshot: missing rank at the low end of a window is only OESD if `lo+4 < 14` (Ace not at top); missing at high end only OESD if `lo > 1` (Ace-low not at bottom). A **"Nothing"** category is always included last for combos matching no other category; on the river the 'nothing' check in `matchesCategory` omits flush/straight draw tests so missed draws are correctly classified as nothing.
+**Hand type categories** — `boardAnalysis(board)` computes rank/suit counts and returns:
+- `rankCounts`, `suitCounts`, `uniqueRanks` (sorted desc by RVAL), `isPaired`, `topRankVal`
+- `hasBoardTrips` — some rank appears exactly 3×
+- `hasBoardFH` — some rank appears 3× AND another appears 2× (trips + pair on board)
+- `hasBoardQuads` — some rank appears 4×
+- `isDoublePaired` — exactly two ranks each appear 2×, no trips/quads
+- `lowestPairedRankVal` — RVAL of the lowest rank that appears 2+ times
+- `boardScore` — `evalHand(board).rank` (precomputed for FH boards; 0 otherwise)
+
+`getHandCategories(pid, board)` dispatches on board type before falling through to the standard single-paired/unpaired path:
+
+| Board type | Categories shown |
+|---|---|
+| Quads on board | Nothing only |
+| FH on board | Quads → Full House (strictly beats `boardScore`) → Nothing |
+| Trips on board (no FH) | SF → Quads → FH → Flush → Straight → Draws → Nothing |
+| Double-paired | SF → Quads → FH → Flush → Straight → Overpair → [Top/2nd Pair if unpaired card isn't the lowest board card] → Underpair → Draws → Nothing |
+| Single-paired / unpaired | Existing logic (Set, Two Pair, Trips, etc.) |
+
+For the double-paired path: the one unpaired card's pair category is suppressed when that card is the lowest-ranked card on the board (counterfeit). `isUnderpair` additionally requires the pocket pair to exceed `lowestPairedRankVal` on double-paired boards — pocket pairs below the lowest paired rank go to Nothing. `matchesCategory` 'nothing' mirrors this: on double-paired boards it excludes `'trips'` and the counterfeit pair index from its allIds check so `selectCategory('nothing')` correctly selects those combos.
+
+OESD vs gutshot: missing rank at the low end of a window is only OESD if `lo+4 < 14` (Ace not at top); missing at high end only OESD if `lo > 1` (Ace-low not at bottom). Straight/flush draws are suppressed on the river and when not structurally possible.
 
 **`isPairAtRank` on paired boards** — On an unpaired board, `isPairAtRank` requires the other hole card to not hit the board (prevents double-counting with `isTwoPair`). On paired boards, `isTwoPair` is disabled, so `isPairAtRank` relaxes this: when both hole cards each pair a different *unpaired* board rank (counterfeit two pair), only the higher-ranked hole card's pair is counted. If the other hole card hits a *paired* board rank (would make a full house), it still returns false.
+
+**Debug board preset** — Module-level `presetBoard[5]` (array of card strings or `null`) is shown as a rank+suit picker row (`#board-preset`) below the debug button, visible only when `debugMode` is on. `buildPresetUI()` renders 5 slots (F1/F2/F3/T/R); selecting a rank enables the suit select and writes to `presetBoard[i]`. At `dealHand()` the array is snapshotted into `G.presetBoard` and preset cards are removed from the shuffled deck before hole cards are dealt (preventing collision). `advanceStreet()` and `runOutBoard()` call `nextCard(i)` which returns `G.presetBoard[i]` if set, otherwise `G.deck.pop()`. Preset persists across hands until cleared or debug mode is toggled off (which resets all slots to `null`). Hidden in online mode alongside the debug button.
 
 **Check display** — `execAction` sets `bdisp[pid].textContent = 'Check'` for postflop checks; `updateUI()` (called by `collectBets()` on street advance) clears it automatically when `G.bets[p] === 0`.
 
@@ -70,7 +94,7 @@ Everything lives inside one IIFE exported as `window.RP`. Structure within the s
 
 **Preflop range slots** — `updateSlotsDisabled()` applies CSS states to each `.range-slots` panel: `pf-disabled` (not preflop, or in online mode: opponent's panel or not your turn), fully active (active player's panel), or `opp-view` (offline only — opponent's panel: load enabled, save/name-edit disabled). `loadRange(pid, i)` always loads into `G.actPid`'s chart regardless of which slot panel `pid` the data came from, remapping actions via `remapAction(action, isFacing(dest))`. In online mode, `saveRange` and `loadRange` both guard `pid !== myPid || G.actPid !== myPid` and return early. Export serialises all 5 slots to a compact JSON string (`{"v":1,"slots":[...]}`) where each slot's ranges are encoded as a 1326-character string (one char per combo in canonical grid order: r=0–12, c=0–12, `typeSuits` order; chars `f/c/k/r/b/.`); `importSlots` reverses this via `encodeSlotRanges` / `decodeSlotRanges`.
 
-**Strength bar** — `buildComboStrengthIndex()` (called at the start of each turn) enumerates all valid combos (excluding board cards), evaluates each with `evalHand([c1,c2,...board])`, sorts by score, and groups equal scores into `comboStrengthGroups`. `renderStrengthBarsInto(bar0, bar1)` is the shared render helper: each strength group becomes a vertical column (`flex-direction: column`) with width proportional to combo count; within each column, height segments are stacked top-to-bottom as not-in-range → unassigned → fold → call → raise (so raise sits at the visual bottom). `renderStrengthBars()` calls this helper for the inline bars (`#sbar0`/`#sbar1`) and, if the popup is open, for `#sbar0-lg`/`#sbar1-lg` inside `#strength-popup`. Clicking the inline bars opens a fixed-position popup (70vw wide) with 120px-tall versions of the same bars; clicking anywhere on the document dismisses it via a one-shot `document.addEventListener('click', dismiss)`. Hidden preflop. The action panel has a toggle (`barView`) between this view and the action-frequency bar (`#range-dist-bar` + `#range-dist`).
+**Strength bar** — `buildComboStrengthIndex()` (called at the start of each turn) enumerates all valid combos (excluding board cards), evaluates each with `evalHand([c1,c2,...board])`, sorts by score ascending, and groups equal scores into `comboStrengthGroups`. Each group gets a `label` (e.g. `"Top Pair"`, `"Flush Draw + OESD"`) precomputed via `comboLabel(c1, c2, ba, board)`, which mirrors the board-type dispatch of `getHandCategories` (quads board / FH board / trips board / double-paired / standard) and joins all matching category names with `" + "`. `renderStrengthBarsInto(bar0, bar1)` is the shared render helper: each group becomes a column div with `data-label` and `data-gidx` attributes, width proportional to combo count; height segments stacked top-to-bottom as not-in-range → fold → call/check → raise/bet (raise sits at the visual bottom). `renderStrengthBars()` calls this helper for the inline bars (`#sbar0`/`#sbar1`) and, if the popup is open, for `#sbar0-lg`/`#sbar1-lg` inside `#strength-popup`. Clicking the inline bars opens a fixed-position popup (70vw wide) with 120px-tall versions; clicking anywhere dismisses it via a one-shot `document.addEventListener('click', dismiss)`. The popup also has: a `#strength-tooltip` (positioned absolutely, shows the category label on hover), and `#strength-stats` (split action-frequency breakdown — combos to the left/right of the hovered group, showing Fold/Call/Check/Raise/Bet counts for the active player's bar or In-Range/Not-In-Range for the opponent's bar). Both are updated in `onBarMove` (guarded by `lastKey = pid:gidx` to avoid redundant DOM work) and cleared on mouse leave. Hidden preflop. The action panel has a toggle (`barView`) between this view and the action-frequency bar (`#range-dist-bar` + `#range-dist`).
 
 ## Layout
 
@@ -115,3 +139,4 @@ Firebase Realtime Database is used for peer-to-peer synchronization. The host (p
 - `comboStrengthGroups` is `null` preflop; the strength bar toggle button is disabled and `barView` resets to `'freq'` automatically when no groups are available
 - Suit filter "contains suit" buttons (♠♥♦♣, in Offsuit and Pairs sections) call `sfAddSuit(type, suitChar)` which **replaces** the current filter with exactly the combos containing that suit — they do not toggle or accumulate
 - `foldEarly` (non-fold case) **deletes** combo keys from `G.ranges[pid][r][c]` (does not just reassign them) and tracks them in `earlyFolded[pid]` for ghost rendering; all other range logic assumes every combo key present in a map has a valid action string
+- There is **no "unassigned" action state** — `initRange` sets every in-range combo to `'fold'` (if facing) or `'check'` (if not) as the default; a key absent from the map means the combo was narrowed out ("not in range"). Always use `ck in map` before reading `map[ck]` — a missing key is not-in-range, not a missing default
