@@ -765,6 +765,7 @@ body {
     <label for="cfg-gamemode">Game Mode</label>
     <select class="gamemode-select" id="cfg-gamemode">
       <option value="nlhe">No Limit Hold'em</option>
+      <option value="sd">Short Deck Hold'em</option>
     </select>
   </div>
 
@@ -1103,6 +1104,9 @@ var RP = (function() {
   var SYM   = {s:'♠', h:'♥', d:'♦', c:'♣'};
   var CLR   = {s:'black', h:'red', d:'red', c:'black'};
   var RVAL  = {A:14,K:13,Q:12,J:11,T:10,9:9,8:8,7:7,6:6,5:5,4:4,3:3,2:2};
+  var RANKS_SD = ['A','K','Q','J','T','9','8','7','6'];
+  var activeMode = 'nlhe'; // 'nlhe' | 'sd'
+  var activeGridN  = 13;
   var SCLR  = {s:'#9ab',h:'#e74c3c',d:'#e74c3c',c:'#9ab'};
 
   var SUITED_SUITS  = ['ss','hh','dd','cc'];
@@ -1142,8 +1146,9 @@ var RP = (function() {
 
   // ---- Deck helpers ----
   function buildDeck() {
+    var activeRanks = activeMode==='sd' ? RANKS_SD : RANKS;
     var d = [];
-    for (var r of RANKS) for (var s of SUITS) d.push(r+s);
+    for (var r of activeRanks) for (var s of SUITS) d.push(r+s);
     return d;
   }
   function shuffle(a) {
@@ -1294,6 +1299,53 @@ var RP = (function() {
     return n+'s';
   }
 
+  // Short Deck evaluator: Flush > Full House; wheel = A-6-7-8-9
+  function eval5SD(cards) {
+    var rv=cards.map(c=>RVAL[cRank(c)]).sort((a,b)=>b-a);
+    var sv=cards.map(c=>cSuit(c));
+    var flush=sv.every(s=>s===sv[0]);
+    var uniq=[...new Set(rv)].sort((a,b)=>b-a);
+    var str=false, strHi=0;
+    for (var i=0;i<=uniq.length-5;i++) {
+      if (uniq[i]-uniq[i+4]===4&&uniq.slice(i,i+5).length===5) { str=true; strHi=uniq[i]; break; }
+    }
+    // SD wheel: A-6-7-8-9 (Ace plays as low card below 6)
+    if (!str&&uniq.includes(14)&&uniq.includes(9)&&uniq.includes(8)&&uniq.includes(7)&&uniq.includes(6)) {
+      str=true; strHi=9;
+    }
+    var cnt={};
+    rv.forEach(r=>cnt[r]=(cnt[r]||0)+1);
+    var grp=Object.entries(cnt).map(([r,c])=>({r:+r,c})).sort((a,b)=>b.c-a.c||b.r-a.r);
+    if (str&&flush) return {rank:8e8+strHi, desc:strHi===14?'Royal Flush':'Straight Flush, '+rname(strHi)+' high'};
+    if (grp[0].c===4) return {rank:7e8+grp[0].r*100+grp[1].r, desc:'Four of a Kind, '+pluralRank(grp[0].r)};
+    // SD: Flush scores above Full House
+    if (flush) { var fv=rv.reduce((a,r,i)=>a+r*Math.pow(15,4-i),0); return {rank:6e8+fv, desc:'Flush, '+rname(rv[0])+' high'}; }
+    if (grp[0].c===3&&grp[1]&&grp[1].c>=2) return {rank:5e8+grp[0].r*100+grp[1].r, desc:'Full House, '+pluralRank(grp[0].r)+' full of '+pluralRank(grp[1].r)};
+    if (str) return {rank:4e8+strHi, desc:'Straight, '+rname(strHi)+' high'};
+    if (grp[0].c===3) { var ks=grp.slice(1).map(g=>g.r); return {rank:3e8+grp[0].r*1e4+ks[0]*100+(ks[1]||0), desc:'Three of a Kind, '+pluralRank(grp[0].r)}; }
+    if (grp[0].c===2&&grp[1]&&grp[1].c===2) { var k3=grp[2]?grp[2].r:0; return {rank:2e8+grp[0].r*1e4+grp[1].r*100+k3, desc:'Two Pair, '+pluralRank(grp[0].r)+' and '+pluralRank(grp[1].r)}; }
+    if (grp[0].c===2) { var ks2=grp.slice(1).map(g=>g.r); return {rank:1e8+grp[0].r*1e6+ks2[0]*1e4+(ks2[1]||0)*100+(ks2[2]||0), desc:'Pair of '+pluralRank(grp[0].r)}; }
+    var hv=rv.reduce((a,r,i)=>a+r*Math.pow(15,4-i),0);
+    return {rank:hv, desc:'High Card '+rname(rv[0])};
+  }
+
+  function evalHandSD(cards) {
+    if (cards.length===5) return eval5SD(cards);
+    var best=null, n=cards.length, skip=n===7?2:1;
+    function iter(start,excluded) {
+      if (excluded.length===skip) {
+        var five=cards.filter((_,k)=>!excluded.includes(k));
+        var v=eval5SD(five); if (!best||v.rank>best.rank) best=v; return;
+      }
+      for (var i=start;i<n;i++){excluded.push(i);iter(i+1,excluded);excluded.pop();}
+    }
+    iter(0,[]); return best;
+  }
+
+  function activeEvalHand(cards) {
+    return activeMode==='sd' ? evalHandSD(cards) : evalHand(cards);
+  }
+
   // ---- DOM helpers ----
   function $(id) { return document.getElementById(id); }
   function fmt(bb) {
@@ -1344,13 +1396,24 @@ var RP = (function() {
     cancelOnlineSetup();
   }
 
+  function setActiveMode(mode) {
+    activeMode  = mode;
+    activeGridN = mode==='sd' ? 9 : 13;
+    // Update timer bar widths to match chart width
+    var barW = 'calc('+activeGridN+' * 37px + 16px)';
+    document.querySelectorAll('.timer-bar').forEach(function(bar){ bar.style.width=barW; });
+  }
+
   function startGame() {
     cancelOnlineSetup();
+    var mode = ($('cfg-gamemode').value) || 'nlhe';
+    setActiveMode(mode);
     var cfg = {
       startStack: parseFloat($('cfg-stack').value)||100,
       timeLimit:  parseInt($('cfg-time').value)||20,
       names: [$('cfg-p1').value||'Player 1', $('cfg-p2').value||'Player 2'],
-      evSplit: $('cfg-ev-split').checked
+      evSplit: $('cfg-ev-split').checked,
+      gameMode: mode
     };
     $('setup-screen').style.display='none';
     $('game-screen').style.display='flex';
@@ -1358,6 +1421,9 @@ var RP = (function() {
   }
 
   function newMatch(cfg) {
+    // Rebuild charts for the active grid size and clear stale preflop slots
+    buildChart(0); buildChart(1);
+    preflopSlots = [[null,null,null,null,null],[null,null,null,null,null]];
     G = {
       cfg: cfg,
       handNum: 1,
@@ -1576,9 +1642,9 @@ var RP = (function() {
     // so excluding them would leak info and reduce count from 1326 to 1225.
     var excluded = [...G.board];
     G.ranges[pid] = [];
-    for (var r=0;r<13;r++) {
+    for (var r=0;r<activeGridN;r++) {
       G.ranges[pid][r]=[];
-      for (var c=0;c<13;c++) {
+      for (var c=0;c<activeGridN;c++) {
         var ht=cellHT(r,c);
         var combos=combosFor(ht);
         var map={};
@@ -1630,15 +1696,12 @@ var RP = (function() {
 
   function updateRangeSum(pid) {
     var el=$('rsum'+pid);
-    if (G.narrowed[pid]!==null) {
-      el.textContent=G.narrowed[pid].size+' combos in range';
-    } else if (G.ranges[pid]) {
+    if (G.ranges[pid]) {
       var n=0;
-      for(var r=0;r<13;r++) for(var c=0;c<13;c++) {
-        var m=G.ranges[pid][r][c];
-        n+=Object.keys(m).length;
+      for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++) {
+        n+=Object.keys(G.ranges[pid][r][c]).length;
       }
-      el.textContent=n+' combos';
+      el.textContent=n+(G.narrowed[pid]!==null?' combos in range':' combos');
     } else {
       el.textContent='';
     }
@@ -1650,7 +1713,7 @@ var RP = (function() {
     if (!distEl||!barEl) return;
     var counts={};
     var total=0;
-    for (var r=0;r<13;r++) for (var c=0;c<13;c++) {
+    for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
       var map=G.ranges[pid][r][c];
       for (var ck in map) {
         var a=map[ck];
@@ -1834,9 +1897,10 @@ var RP = (function() {
     var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
     if (ba.hasBoardQuads) return 'Nothing';
     if (ba.hasBoardFH) {
-      var s=evalHand([c1,c2].concat(board)).rank;
+      var s=activeEvalHand([c1,c2].concat(board)).rank;
+      var FH_THRESH=activeMode==='sd'?5e8:6e8;
       if (s>=7e8) return 'Quads';
-      if (s>=6e8&&s>ba.boardScore) return 'Full House';
+      if (s>=FH_THRESH&&s>ba.boardScore) return 'Full House';
       return 'Nothing';
     }
     var checkFlush=Object.values(ba.suitCounts).some(function(c){return c>=3;});
@@ -1848,8 +1912,14 @@ var RP = (function() {
       var t=handTier(c1,c2,board);
       if (checkFlush&&checkSt&&t===8) matched.push('Str. Flush');
       if (t===7) matched.push('Quads');
-      if (t===6) matched.push('Full House');
-      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      // SD: flush > FH; push in strength order
+      if (activeMode==='sd') {
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+        if (t===6) matched.push('Full House');
+      } else {
+        if (t===6) matched.push('Full House');
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      }
       if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
       if (checkFD&&isFlushDraw(c1,c2,ba)) matched.push('Flush Draw');
       if (checkDr) { var dt=getStraightDrawType(c1,c2,board); if(dt&&dt.oesd) matched.push('OESD'); if(dt&&dt.gutshot) matched.push('Gutshot'); }
@@ -1861,8 +1931,13 @@ var RP = (function() {
       var t2=handTier(c1,c2,board);
       if (checkFlush&&checkSt&&t2===8) matched.push('Str. Flush');
       if (t2===7) matched.push('Quads');
-      if (t2===6) matched.push('Full House');
-      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      if (activeMode==='sd') {
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+        if (t2===6) matched.push('Full House');
+      } else {
+        if (t2===6) matched.push('Full House');
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      }
       if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
       if (showPairCat&&isPairAtRank(c1,c2,unpairedRank,ba)) matched.push(pnames[pairCatIdx]);
       if (ba.topRankVal<14&&isOverpair(c1,c2,ba)) matched.push('Overpair');
@@ -1872,16 +1947,25 @@ var RP = (function() {
     } else {
       var t3=handTier(c1,c2,board);
       if (checkFlush&&checkSt&&t3===8) matched.push('Str. Flush');
-      if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
-      if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
-      if (ba.isPaired) {
-        if (t3===7) matched.push('Quads');
-        else if (t3===6) matched.push('Full House');
-        else if (t3===3) matched.push('Trips');
+      if (activeMode==='sd') {
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+        if (ba.isPaired) {
+          if (t3===7) matched.push('Quads');
+          else if (t3===6) matched.push('Full House');
+        }
       } else {
+        if (ba.isPaired) {
+          if (t3===7) matched.push('Quads');
+          else if (t3===6) matched.push('Full House');
+        }
+        if (checkFlush&&isFlushHand(c1,c2,ba)) matched.push('Flush');
+      }
+      if (checkSt&&isStraightHand(c1,c2,board)) matched.push('Straight');
+      if (!ba.isPaired) {
         if (isSet(c1,c2,ba)) matched.push('Set');
         if (isTwoPair(c1,c2,ba)) matched.push('Two Pair');
       }
+      if (ba.isPaired&&t3===3) matched.push('Trips');
       if (ba.topRankVal<14&&isOverpair(c1,c2,ba)) matched.push('Overpair');
       var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};}).filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
       validPairIdxs.forEach(function(pp){ if(isPairAtRank(c1,c2,pp.r,ba)) matched.push(pnames[pp.i]); });
@@ -1896,14 +1980,14 @@ var RP = (function() {
     if (!G.board||G.board.length===0) { comboStrengthGroups=null; return; }
     var boardSet=new Set(G.board);
     var scored=[];
-    for (var ri=0;ri<13;ri++) {
-      for (var ci=0;ci<13;ci++) {
+    for (var ri=0;ri<activeGridN;ri++) {
+      for (var ci=0;ci<activeGridN;ci++) {
         var type=cellType(ri,ci);
         for (var suit of typeSuits(type)) {
           var ck=htSuitKey(ri,ci,suit);
           var c1=ck.slice(0,2), c2=ck.slice(2,4);
           if (boardSet.has(c1)||boardSet.has(c2)) continue;
-          var score=evalHand([c1,c2].concat(G.board)).rank;
+          var score=activeEvalHand([c1,c2].concat(G.board)).rank;
           scored.push({ck:ck,score:score});
         }
       }
@@ -1981,8 +2065,10 @@ var RP = (function() {
   // Build chart cells (once per hand)
   function buildChart(pid) {
     var chart=$('chart'+pid);
+    chart.style.gridTemplateColumns='repeat('+activeGridN+', 37px)';
+    chart.style.gridTemplateRows='repeat('+activeGridN+', 47px)';
     chart.innerHTML='';
-    for (var r=0;r<13;r++) for (var c=0;c<13;c++) {
+    for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
       var cell=document.createElement('div');
       cell.className='hc';
       cell.dataset.r=r; cell.dataset.c=c;
@@ -2039,7 +2125,7 @@ var RP = (function() {
 
   function selectAll() {
     var pid=G.actPid;
-    for(var r=0;r<13;r++) for(var c=0;c<13;c++){
+    for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++){
       var cks=filteredCombosForCell(pid,r,c);
       for(var i=0;i<cks.length;i++) drag.cells.add(cks[i]);
     }
@@ -2320,7 +2406,7 @@ var RP = (function() {
     var pairedRanks=Object.keys(rc).filter(function(r){return rc[r]>=2;}).sort(function(a,b){return RVAL[a]-RVAL[b];});
     var isDoublePaired=pairedRanks.length===2&&!hasBoardTrips&&!hasBoardQuads;
     var lowestPairedRankVal=pairedRanks.length>0?RVAL[pairedRanks[0]]:0;
-    var boardScore=hasBoardFH&&board.length>=5?evalHand(board).rank:0;
+    var boardScore=hasBoardFH&&board.length>=5?activeEvalHand(board).rank:0;
     return {rankCounts:rc, suitCounts:sc, uniqueRanks:ur,
             isPaired:rcVals.some(function(c){return c>=2;}),
             topRankVal:ur.length>0?RVAL[ur[0]]:0,
@@ -2330,24 +2416,27 @@ var RP = (function() {
 
   function hasStraightRanks(rvArr) {
     var s=new Set(rvArr);
-    if(s.has(14)) s.add(1);
-    for(var lo=1;lo<=10;lo++)
+    var lo_min=activeMode==='sd'?5:1; // SD wheel: A plays as 5 (one below 6)
+    if(s.has(14)) s.add(lo_min);
+    for(var lo=lo_min;lo<=10;lo++)
       if([lo,lo+1,lo+2,lo+3,lo+4].every(function(r){return s.has(r);})) return true;
     return false;
   }
 
   function isStraightPossible(ba) {
     var s=new Set(ba.uniqueRanks.map(function(r){return RVAL[r];}));
-    if(s.has(14)) s.add(1);
-    for(var lo=1;lo<=10;lo++)
+    var lo_min=activeMode==='sd'?5:1;
+    if(s.has(14)) s.add(lo_min);
+    for(var lo=lo_min;lo<=10;lo++)
       if([lo,lo+1,lo+2,lo+3,lo+4].filter(function(r){return s.has(r);}).length>=3) return true;
     return false;
   }
 
   function isDrawPossible(ba) {
     var s=new Set(ba.uniqueRanks.map(function(r){return RVAL[r];}));
-    if(s.has(14)) s.add(1);
-    for(var lo=1;lo<=10;lo++)
+    var lo_min=activeMode==='sd'?5:1;
+    if(s.has(14)) s.add(lo_min);
+    for(var lo=lo_min;lo<=10;lo++)
       if([lo,lo+1,lo+2,lo+3,lo+4].filter(function(r){return s.has(r);}).length>=2) return true;
     return false;
   }
@@ -2398,13 +2487,14 @@ var RP = (function() {
     var allRV=[c1,c2].concat(board).map(function(c){return RVAL[cRank(c)];});
     if(hasStraightRanks(allRV)) return null;
     var s=new Set(allRV);
-    if(s.has(14)) s.add(1);
+    var lo_min=activeMode==='sd'?5:1;
+    if(s.has(14)) s.add(lo_min);
     var oesd=false,gutshot=false;
-    for(var lo=1;lo<=10;lo++){
+    for(var lo=lo_min;lo<=10;lo++){
       var win=[lo,lo+1,lo+2,lo+3,lo+4];
       if(win.filter(function(r){return s.has(r);}).length===4){
         var mi=win.findIndex(function(r){return !s.has(r);});
-        if((mi===0&&lo+4<14)||(mi===4&&lo>1)) oesd=true; else gutshot=true;
+        if((mi===0&&lo+4<14)||(mi===4&&lo>lo_min)) oesd=true; else gutshot=true;
       }
     }
     return {oesd:oesd,gutshot:gutshot};
@@ -2425,11 +2515,16 @@ var RP = (function() {
   }
 
   function handTier(c1,c2,board) {
-    var h=evalHand([c1,c2].concat(board)).rank;
+    var h=activeEvalHand([c1,c2].concat(board)).rank;
     if(h>=8e8) return 8;
     if(h>=7e8) return 7; // quads
-    if(h>=6e8) return 6; // full house
-    if(h>=5e8) return 5; // flush
+    if(activeMode==='sd') {
+      if(h>=6e8) return 5; // flush (SD: flush at 6e8+, above FH)
+      if(h>=5e8) return 6; // FH   (SD: FH at 5e8+, below flush)
+    } else {
+      if(h>=6e8) return 6; // FH
+      if(h>=5e8) return 5; // flush
+    }
     if(h>=4e8) return 4; // straight
     if(h>=3e8) return 3; // trips
     if(h>=2e8) return 2;
@@ -2456,9 +2551,11 @@ var RP = (function() {
       case 'set':       return isSet(c1,c2,ba);
       case 'trips':     return handTier(c1,c2,board)===3;
       case 'fullhouse': {
+        var FH_MIN=activeMode==='sd'?5e8:6e8;
+        var FH_MAX=activeMode==='sd'?6e8:7e8;
         if(ba.hasBoardFH){
-          var fhScore=evalHand([c1,c2].concat(board)).rank;
-          return fhScore>=6e8&&fhScore<7e8&&fhScore>ba.boardScore;
+          var fhScore=activeEvalHand([c1,c2].concat(board)).rank;
+          return fhScore>=FH_MIN&&fhScore<FH_MAX&&fhScore>ba.boardScore;
         }
         return handTier(c1,c2,board)===6;
       }
@@ -2466,8 +2563,9 @@ var RP = (function() {
       case 'nothing': {
         if(ba.hasBoardQuads) return true;
         if(ba.hasBoardFH){
-          var nScore=evalHand([c1,c2].concat(board)).rank;
-          return nScore<7e8&&nScore<=ba.boardScore;
+          var nScore=activeEvalHand([c1,c2].concat(board)).rank;
+          var FH_THRESH_N=activeMode==='sd'?5e8:6e8;
+          return nScore<FH_THRESH_N||nScore<=ba.boardScore;
         }
         var isRiv=board&&board.length===5;
         var allIds=['flush','straightflush','straight','pair0','pair1','pair2','pair3','pair4',
@@ -2501,7 +2599,7 @@ var RP = (function() {
 
     // All combos in current range → callback(c1, c2)
     function eachCombo(fn) {
-      for(var row=0;row<13;row++) for(var col=0;col<13;col++){
+      for(var row=0;row<activeGridN;row++) for(var col=0;col<activeGridN;col++){
         var map=G.ranges[pid][row][col];
         var type=cellType(row,col);
         for(var suit of typeSuits(type)){
@@ -2511,6 +2609,8 @@ var RP = (function() {
       }
     }
 
+    var SD=activeMode==='sd';
+
     // --- QUADS BOARD: all nothing ---
     if(ba.hasBoardQuads){
       eachCombo(function(){counts.nothing++;});
@@ -2519,10 +2619,11 @@ var RP = (function() {
 
     // --- FULL HOUSE BOARD: quads → stronger FH → nothing ---
     if(ba.hasBoardFH){
+      var FH_THRESH=SD?5e8:6e8;
       eachCombo(function(c1,c2){
-        var score=evalHand([c1,c2].concat(board)).rank;
+        var score=activeEvalHand([c1,c2].concat(board)).rank;
         if(score>=7e8) counts.quads++;
-        else if(score>=6e8&&score>ba.boardScore) counts.fullhouse++;
+        else if(score>=FH_THRESH&&score>ba.boardScore) counts.fullhouse++;
         else counts.nothing++;
       });
       var cats=[];
@@ -2532,7 +2633,7 @@ var RP = (function() {
       return cats;
     }
 
-    // --- TRIPS BOARD: SF → quads → FH → flush → straight → draws → nothing ---
+    // --- TRIPS BOARD: SF → quads → [Flush > FH in SD] → straight → draws → nothing ---
     if(ba.hasBoardTrips){
       eachCombo(function(c1,c2){
         var _any=false;
@@ -2549,8 +2650,13 @@ var RP = (function() {
       var cats=[];
       if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
       if(counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
-      if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
-      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      if(SD) {
+        if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+        if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      } else {
+        if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+        if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      }
       if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
       if(!isRiver&&counts.flushdraw>0) cats.push({id:'flushdraw',label:'Flush Draw',n:counts.flushdraw});
       if(!isRiver&&counts.oesd>0) cats.push({id:'oesd',label:'OESD',n:counts.oesd});
@@ -2559,12 +2665,10 @@ var RP = (function() {
       return cats;
     }
 
-    // --- DOUBLE PAIRED BOARD: SF → quads → FH → flush → straight → single pair → draws → nothing ---
+    // --- DOUBLE PAIRED BOARD ---
     if(ba.isDoublePaired){
-      // Unpaired card: there is 0 or 1 rank with count===1
       var unpairedRanks=ba.uniqueRanks.filter(function(r){return ba.rankCounts[r]===1;});
-      var unpairedRank=unpairedRanks.length>0?unpairedRanks[0]:null; // highest since sorted desc
-      // Show pair category only if unpaired card exists AND is not the lowest board card
+      var unpairedRank=unpairedRanks.length>0?unpairedRanks[0]:null;
       var unpairedIsLowest=unpairedRank&&RVAL[unpairedRank]<ba.lowestPairedRankVal;
       var showPairCat=unpairedRank&&!unpairedIsLowest;
       var pairCatIdx=showPairCat?ba.uniqueRanks.indexOf(unpairedRank):-1;
@@ -2587,8 +2691,13 @@ var RP = (function() {
       var cats=[];
       if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
       if(counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
-      if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
-      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      if(SD) {
+        if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+        if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      } else {
+        if(counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+        if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      }
       if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
       if(counts.overpair>0) cats.push({id:'overpair',label:'Overpair',n:counts.overpair});
       if(showPairCat&&counts['p'+pairCatIdx]>0) cats.push({id:'pair'+pairCatIdx,label:pnames[pairCatIdx],n:counts['p'+pairCatIdx]});
@@ -2600,7 +2709,7 @@ var RP = (function() {
       return cats;
     }
 
-    // --- SINGLE-PAIRED or UNPAIRED (existing logic) ---
+    // --- SINGLE-PAIRED or UNPAIRED ---
     var validPairIdxs=ba.uniqueRanks.map(function(r,i){return {r:r,i:i};})
                         .filter(function(x){return ba.rankCounts[x.r]===1&&x.i<5;});
 
@@ -2622,8 +2731,13 @@ var RP = (function() {
     var cats=[];
     if(counts.straightflush>0) cats.push({id:'straightflush',label:'Str. Flush',n:counts.straightflush});
     if(ba.isPaired&&counts.quads>0) cats.push({id:'quads',label:'Quads',n:counts.quads});
-    if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
-    if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+    if(SD) {
+      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+      if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+    } else {
+      if(ba.isPaired&&counts.fullhouse>0) cats.push({id:'fullhouse',label:'Full House',n:counts.fullhouse});
+      if(counts.flush>0) cats.push({id:'flush',label:'Flush',n:counts.flush});
+    }
     if(counts.straight>0) cats.push({id:'straight',label:'Straight',n:counts.straight});
     if(ba.isPaired&&counts.trips>0) cats.push({id:'trips',label:'Trips',n:counts.trips});
     if(!ba.isPaired&&counts.set>0) cats.push({id:'set',label:'Set',n:counts.set});
@@ -2640,7 +2754,7 @@ var RP = (function() {
 
   function selectCategory(catId, ba, board) {
     var pid=G.actPid;
-    for(var r=0;r<13;r++) for(var c=0;c<13;c++){
+    for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++){
       var map=G.ranges[pid][r][c];
       var type=cellType(r,c);
       for(var suit of typeSuits(type)){
@@ -2818,8 +2932,8 @@ var RP = (function() {
     if (undoStack.length === 0) return;
     var entry = undoStack.pop();
     var pid = entry.pid;
-    for (var r = 0; r < 13; r++) {
-      for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) {
+      for (var c = 0; c < activeGridN; c++) {
         var map = G.ranges[pid][r][c];
         for (var ck in map) {
           if (ck in entry.delta) map[ck] = entry.delta[ck];
@@ -2948,8 +3062,8 @@ var RP = (function() {
     } else {
       // Actual hand is not in the fold range — strip fold combos from range without submitting
       var foldCombos = new Set();
-      for (var rr = 0; rr < 13; rr++) {
-        for (var cc = 0; cc < 13; cc++) {
+      for (var rr = 0; rr < activeGridN; rr++) {
+        for (var cc = 0; cc < activeGridN; cc++) {
           var map = G.ranges[pid][rr][cc];
           for (var k in map) {
             if (map[k] === 'fold') foldCombos.add(k);
@@ -2963,8 +3077,8 @@ var RP = (function() {
       // Remove fold combos from G.narrowed (or build it from scratch if null)
       if (G.narrowed[pid] === null) {
         var allCombos = new Set();
-        for (var rr = 0; rr < 13; rr++) {
-          for (var cc = 0; cc < 13; cc++) {
+        for (var rr = 0; rr < activeGridN; rr++) {
+          for (var cc = 0; cc < activeGridN; cc++) {
             var map = G.ranges[pid][rr][cc];
             for (var k in map) allCombos.add(k);
           }
@@ -2975,8 +3089,8 @@ var RP = (function() {
         foldCombos.forEach(function(k) { G.narrowed[pid].delete(k); });
       }
       // Remove fold entries from the range maps and track them for ghost rendering
-      for (var rr = 0; rr < 13; rr++) {
-        for (var cc = 0; cc < 13; cc++) {
+      for (var rr = 0; rr < activeGridN; rr++) {
+        for (var cc = 0; cc < activeGridN; cc++) {
           var map = G.ranges[pid][rr][cc];
           for (var k in map) {
             if (map[k] === 'fold') { earlyFolded[pid].add(k); delete map[k]; }
@@ -3025,7 +3139,7 @@ var RP = (function() {
 
     // Build narrowed range: all combos that took same action
     var narrowedSet=new Set();
-    for(var rr=0;rr<13;rr++) for(var cc=0;cc<13;cc++) {
+    for(var rr=0;rr<activeGridN;rr++) for(var cc=0;cc<activeGridN;cc++) {
       var m=G.ranges[pid][rr][cc];
       for(var k in m) {
         if (m[k]===action) narrowedSet.add(k);
@@ -3150,8 +3264,8 @@ var RP = (function() {
     function validCombos(pid) {
       var out = [];
       var narrowed = G.narrowed[pid]; // Set<comboKey> or null
-      for (var r = 0; r < 13; r++) {
-        for (var c = 0; c < 13; c++) {
+      for (var r = 0; r < activeGridN; r++) {
+        for (var c = 0; c < activeGridN; c++) {
           var map = G.ranges[pid][r][c];
           if (!map) continue;
           for (var ck in map) {
@@ -3172,10 +3286,10 @@ var RP = (function() {
     // Pre-compute ranks for every combo before the double loop so evalHand
     // is called O(N) times instead of O(N²).
     var ranks0 = combos0.map(function(ck) {
-      return evalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+      return activeEvalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
     });
     var ranks1 = combos1.map(function(ck) {
-      return evalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+      return activeEvalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
     });
 
     var wins0 = 0, wins1 = 0, ties = 0;
@@ -3206,8 +3320,8 @@ var RP = (function() {
     hideActionPanel();
     renderHole(0,true); renderHole(1,true);
     var board=G.board;
-    var h0=evalHand([...G.hole[0],...board]);
-    var h1=evalHand([...G.hole[1],...board]);
+    var h0=activeEvalHand([...G.hole[0],...board]);
+    var h1=activeEvalHand([...G.hole[1],...board]);
     var pot=G.pot;
     var winner=-1, title, potText, sdP0class, sdP1class;
 
@@ -3320,7 +3434,7 @@ var RP = (function() {
   function buildPresetUI() {
     var container = $('preset-slots');
     container.innerHTML = '';
-    var ranks = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
+    var ranks = activeMode==='sd' ? RANKS_SD : ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
     var suits = [['s','♠'],['h','♥'],['d','♦'],['c','♣']];
     var labels = ['F1','F2','F3','T','R'];
     for (var i = 0; i < 5; i++) {
@@ -3528,8 +3642,8 @@ var RP = (function() {
     var facing = isFacing(dest);
     var defAction = facing ? 'fold' : 'check';
     var savedRanges = slot.ranges;
-    for (var r = 0; r < 13; r++) {
-      for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) {
+      for (var c = 0; c < activeGridN; c++) {
         var curMap = G.ranges[dest][r][c];
         var savedMap = savedRanges[r] && savedRanges[r][c];
         for (var ck in curMap) {
@@ -3561,7 +3675,7 @@ var RP = (function() {
   function encodeNarrowed(set) {
     if (set === null) return null;
     var out = [];
-    for (var r = 0; r < 13; r++) for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) for (var c = 0; c < activeGridN; c++) {
       var type = cellType(r, c);
       for (var suit of typeSuits(type)) out.push(set.has(htSuitKey(r,c,suit)) ? '1' : '0');
     }
@@ -3571,7 +3685,7 @@ var RP = (function() {
   function decodeNarrowed(str) {
     if (str === null) return null;
     var set = new Set(), idx = 0;
-    for (var r = 0; r < 13; r++) for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) for (var c = 0; c < activeGridN; c++) {
       var type = cellType(r, c);
       for (var suit of typeSuits(type)) { if (str[idx] === '1') set.add(htSuitKey(r,c,suit)); idx++; }
     }
@@ -3580,8 +3694,8 @@ var RP = (function() {
 
   function encodeSlotRanges(ranges) {
     var out = [];
-    for (var r = 0; r < 13; r++) {
-      for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) {
+      for (var c = 0; c < activeGridN; c++) {
         var type = cellType(r, c);
         var cell = ranges[r] && ranges[r][c];
         for (var suit of typeSuits(type)) {
@@ -3596,10 +3710,10 @@ var RP = (function() {
 
   function decodeSlotRanges(str) {
     var ranges = [];
-    for (var r = 0; r < 13; r++) { ranges[r] = []; for (var c = 0; c < 13; c++) ranges[r][c] = {}; }
+    for (var r = 0; r < activeGridN; r++) { ranges[r] = []; for (var c = 0; c < activeGridN; c++) ranges[r][c] = {}; }
     var idx = 0;
-    for (var r = 0; r < 13; r++) {
-      for (var c = 0; c < 13; c++) {
+    for (var r = 0; r < activeGridN; r++) {
+      for (var c = 0; c < activeGridN; c++) {
         var type = cellType(r, c);
         for (var suit of typeSuits(type)) {
           var ck = htSuitKey(r, c, suit);
@@ -3617,7 +3731,7 @@ var RP = (function() {
       var name = ($('rsn-'+pid+'-'+i) || {}).textContent || ('Slot '+(i+1));
       return { name: name, r: encodeSlotRanges(slot.ranges), b: slot.betSz || null };
     });
-    var text = JSON.stringify({ v: 1, slots: slots });
+    var text = JSON.stringify({ v: activeMode==='sd'?2:1, slots: slots });
     navigator.clipboard.writeText(text).then(function() {
       var btn = document.querySelector('#rs'+pid+' .rs-io-btn');
       if (!btn) return;
@@ -3645,13 +3759,15 @@ var RP = (function() {
     if (!text) { err('Nothing pasted.'); return; }
     var data;
     try { data = JSON.parse(text); } catch(e) { err('Invalid text.'); return; }
-    if (!data || data.v !== 1 || !Array.isArray(data.slots) || data.slots.length !== 5) {
-      err('Unrecognised format.'); return;
+    var expectedV = activeMode==='sd' ? 2 : 1;
+    var expectedLen = activeMode==='sd' ? 630 : 1326;
+    if (!data || data.v !== expectedV || !Array.isArray(data.slots) || data.slots.length !== 5) {
+      err('Unrecognised format — make sure the export matches the current game mode.'); return;
     }
     var loaded = 0;
     data.slots.forEach(function(slot, i) {
       if (!slot) { preflopSlots[pid][i] = null; return; }
-      if (typeof slot.r !== 'string' || slot.r.length !== 1326) { err('Slot '+(i+1)+' is corrupt.'); return; }
+      if (typeof slot.r !== 'string' || slot.r.length !== expectedLen) { err('Slot '+(i+1)+' is corrupt.'); return; }
       preflopSlots[pid][i] = { ranges: decodeSlotRanges(slot.r), betSz: slot.b || null };
       var nameEl = $('rsn-'+pid+'-'+i);
       if (nameEl && slot.name) nameEl.textContent = slot.name;
@@ -3695,6 +3811,8 @@ var RP = (function() {
     var startStack = parseFloat($('cfg-online-stack').value) || 100;
     var timeLimit  = parseInt($('cfg-online-time').value)    || 120;
     var evSplit    = $('cfg-online-ev-split').checked;
+    var gameMode   = $('cfg-gamemode').value || 'nlhe';
+    setActiveMode(gameMode);
 
     roomCode  = generateRoomCode();
     myPid     = 0;
@@ -3702,7 +3820,7 @@ var RP = (function() {
 
     db.ref('rooms/'+roomCode).set({
       status: 'waiting',
-      config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit, evSplit: evSplit }
+      config: { p0name: hostName, startStack: startStack, timeLimit: timeLimit, evSplit: evSplit, gameMode: gameMode }
     });
     db.ref('rooms/'+roomCode).onDisconnect().remove();
 
@@ -3731,7 +3849,7 @@ var RP = (function() {
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
       $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
-      newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit });
+      newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit, gameMode: gameMode });
     });
   }
 
@@ -3770,7 +3888,10 @@ var RP = (function() {
         $('setup-screen').style.display = 'none';
         $('game-screen').style.display  = 'flex';
         $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
-        newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
+        var rejoinMode = cfg.gameMode || 'nlhe';
+        setActiveMode(rejoinMode);
+        $('cfg-gamemode').value = rejoinMode;
+        newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit, gameMode: rejoinMode });
         return;
       }
 
@@ -3793,7 +3914,10 @@ var RP = (function() {
       $('game-screen').style.display  = 'flex';
       $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
       // newMatch creates G and calls dealHand(), which returns early for the guest
-      newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
+      var guestMode = cfg.gameMode || 'nlhe';
+      setActiveMode(guestMode);
+      $('cfg-gamemode').value = guestMode;
+      newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit, gameMode: guestMode });
     });
   }
 
