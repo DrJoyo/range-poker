@@ -661,6 +661,33 @@ body {
 .btn-continue:hover { filter: brightness(1.1); }
 
 /* ===== ONLINE LOBBY ===== */
+.gamemode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 360px;
+  background: #0f1f10;
+  border: 1px solid #1a3a22;
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+.gamemode-row label {
+  color: #aaa;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+.gamemode-select {
+  background: #0f3a1a;
+  border: 1px solid #1a5c2e;
+  border-radius: 6px;
+  color: #fff;
+  padding: 5px 10px;
+  font-size: 0.9em;
+  cursor: pointer;
+  min-width: 180px;
+  text-align: center;
+}
+.gamemode-select:focus { outline: none; border-color: #f0c040; }
 .mode-tabs {
   display: flex;
   background: #0f1f10;
@@ -734,7 +761,12 @@ body {
 <!-- SETUP SCREEN -->
 <div id="setup-screen">
   <h1>♠ Range Poker ♥</h1>
-  <p style="color:#666;font-size:0.85em;">Heads-Up No-Limit Texas Hold'em</p>
+  <div class="gamemode-row">
+    <label for="cfg-gamemode">Game Mode</label>
+    <select class="gamemode-select" id="cfg-gamemode">
+      <option value="nlhe">No Limit Hold'em</option>
+    </select>
+  </div>
 
   <div class="mode-tabs">
     <button class="mode-tab active" id="tab-local" onclick="RP.setSetupMode('local')">Local</button>
