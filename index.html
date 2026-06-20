@@ -196,6 +196,7 @@ body {
   cursor: crosshair;
   user-select: none;
   margin-top: 10px;
+  position: relative;
 }
 .hc {
   width: 37px; height: 47px;
@@ -224,6 +225,8 @@ body {
 .hc-suit { background: #0a0f0a; position: relative; }
 .hc.drag-sel { z-index: 3; }
 .hc-suit.drag-sel::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,0.36); pointer-events:none; z-index:4; }
+.hc-chart-svg { position:absolute; inset:0; pointer-events:none; z-index:10; }
+.hc-chart-svg line { stroke:rgba(255,255,255,0.9); stroke-width:1.5; }
 
 /* Suit filter panel */
 #suit-filter { border-top: 1px solid #1a3a22; margin-top: 3px; padding-top: 3px; }
@@ -1968,6 +1971,11 @@ var RP = (function() {
       cell.appendChild(sg);
       chart.appendChild(cell);
     }
+    var ov=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    ov.setAttribute('class','hc-chart-svg');
+    ov.setAttribute('width','100%');
+    ov.setAttribute('height','100%');
+    chart.appendChild(ov);
   }
 
   // ---- Drag selection ----
@@ -2078,19 +2086,43 @@ var RP = (function() {
     var chart=$('chart'+G.actPid);
     if (!chart) return;
     var pid=G.actPid;
+    var chartSvg=chart.querySelector('.hc-chart-svg');
+    if(chartSvg) chartSvg.innerHTML='';
     chart.querySelectorAll('.hc').forEach(function(cell){
       var r=+cell.dataset.r, c=+cell.dataset.c;
       var type=cellType(r,c);
       var suits=typeSuits(type);
+      var cols=type==='suited'?2:3;
+      var rows=type==='suited'?2:(type==='pair'?2:4);
+      var selFlags=suits.map(function(suit){ return drag.cells.has(htSuitKey(r,c,suit)); });
       var anySel=false;
       cell.querySelectorAll('.hc-suit').forEach(function(sr, idx){
-        var ck=htSuitKey(r,c,suits[idx]);
-        var on=drag.cells.has(ck);
+        var on=selFlags[idx];
         if(on) anySel=true;
         if(on) sr.classList.add('drag-sel'); else sr.classList.remove('drag-sel');
       });
       cell.dataset.dragsel=anySel?'1':'0';
       if(anySel) cell.classList.add('drag-sel'); else cell.classList.remove('drag-sel');
+      if(anySel){
+        // pixel coords: padding=1, gap=1, cell=37x47, label=12
+        var cLeft=1+c*38, sTop=1+r*48+12;
+        var xStep=37/cols, yStep=35/rows;
+        for(var si=0;si<selFlags.length;si++){
+          if(!selFlags[si]) continue;
+          var srow=Math.floor(si/cols),scol=si%cols;
+          var x0=cLeft+scol*xStep, x1=cLeft+(scol+1)*xStep;
+          var y0=sTop+srow*yStep,  y1=sTop+(srow+1)*yStep;
+          function al(ax,ay,bx,by){
+            var l=document.createElementNS('http://www.w3.org/2000/svg','line');
+            l.setAttribute('x1',ax);l.setAttribute('y1',ay);l.setAttribute('x2',bx);l.setAttribute('y2',by);
+            chartSvg.appendChild(l);
+          }
+          if(srow===0      ||!selFlags[(srow-1)*cols+scol]) al(x0,y0,x1,y0);
+          if(srow===rows-1 ||!selFlags[(srow+1)*cols+scol]) al(x0,y1,x1,y1);
+          if(scol===0      ||!selFlags[srow*cols+(scol-1)]) al(x0,y0,x0,y1);
+          if(scol===cols-1 ||!selFlags[srow*cols+(scol+1)]) al(x1,y0,x1,y1);
+        }
+      }
     });
     var btn=$('sel-all-btn');
     if(btn){
