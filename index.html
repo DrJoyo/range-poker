@@ -936,6 +936,10 @@ body {
       <div id="log"></div>
       <button id="next-btn" onclick="RP.nextHand()">Next Hand</button>
       <button id="debug-btn" onclick="RP.toggleDebug()" style="background:#1c1c1c;border:1px solid #333;color:#555;border-radius:5px;padding:4px 10px;font-size:0.72em;cursor:pointer;margin-top:2px;">🔍 Debug: Off</button>
+      <div id="board-preset" style="display:none;margin-top:6px;display:none">
+        <div style="font-size:0.68em;color:#888;margin-bottom:3px;text-align:center">Board preset (next hand)</div>
+        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:center" id="preset-slots"></div>
+      </div>
     </div>
 
     <!-- P2 panel (col 4) -->
@@ -1378,6 +1382,10 @@ var RP = (function() {
       return;
     }
     G.deck = shuffle(buildDeck());
+    // Snapshot the preset and remove those cards from the deck so they can't be hole cards
+    G.presetBoard = presetBoard.slice();
+    var presetSet = new Set(G.presetBoard.filter(function(c){return c;}));
+    if (presetSet.size) G.deck = G.deck.filter(function(c){return !presetSet.has(c);});
     G.hole[0] = [G.deck.pop(), G.deck.pop()];
     G.hole[1] = [G.deck.pop(), G.deck.pop()];
     if (onlineMode) writeHandToFirebase();
@@ -1459,8 +1467,11 @@ var RP = (function() {
     if (idx>=3) { showdown(); return; }
     var next=order[idx+1];
     var prevLen=G.board.length;
-    if (next==='flop')  { G.board.push(G.deck.pop(),G.deck.pop(),G.deck.pop()); }
-    else                { G.board.push(G.deck.pop()); }
+    var pb=G.presetBoard||[];
+    function nextCard(presetIdx){ return pb[presetIdx]||G.deck.pop(); }
+    if (next==='flop')  { G.board.push(nextCard(0),nextCard(1),nextCard(2)); }
+    else if(next==='turn')  { G.board.push(nextCard(3)); }
+    else                    { G.board.push(nextCard(4)); }
     renderBoard(prevLen);
     startStreet(next);
   }
@@ -2879,9 +2890,11 @@ var RP = (function() {
 
   // ---- All-in runout ----
   function runOutBoard() {
-    while(G.board.length<3) G.board.push(G.deck.pop());
-    if(G.board.length<4) G.board.push(G.deck.pop());
-    if(G.board.length<5) G.board.push(G.deck.pop());
+    var pb=G.presetBoard||[];
+    function nextCard(i){ return pb[i]||G.deck.pop(); }
+    while(G.board.length<3) G.board.push(nextCard(G.board.length));
+    if(G.board.length<4) G.board.push(nextCard(3));
+    if(G.board.length<5) G.board.push(nextCard(4));
     renderBoard();
     renderHole(0,true); renderHole(1,true);
     setTimeout(function(){ showdown(); }, 800);
@@ -3061,17 +3074,72 @@ var RP = (function() {
 
   // ---- Debug mode ----
   var debugMode = false;
+  var presetBoard = [null,null,null,null,null]; // null = deal randomly for that position
+
+  function buildPresetUI() {
+    var container = $('preset-slots');
+    container.innerHTML = '';
+    var ranks = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
+    var suits = [['s','♠'],['h','♥'],['d','♦'],['c','♣']];
+    var labels = ['F1','F2','F3','T','R'];
+    for (var i = 0; i < 5; i++) {
+      (function(idx) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px';
+
+        var lbl = document.createElement('div');
+        lbl.textContent = labels[idx];
+        lbl.style.cssText = 'font-size:0.6em;color:#666';
+
+        var rSel = document.createElement('select');
+        rSel.style.cssText = 'background:#1a1a1a;color:#ddd;border:1px solid #333;border-radius:3px;padding:1px 2px;font-size:0.75em;width:38px';
+        var blank = document.createElement('option');
+        blank.value = ''; blank.textContent = '-';
+        rSel.appendChild(blank);
+        ranks.forEach(function(r) {
+          var o = document.createElement('option'); o.value = r; o.textContent = r;
+          if (presetBoard[idx] && presetBoard[idx][0] === r) o.selected = true;
+          rSel.appendChild(o);
+        });
+
+        var sSel = document.createElement('select');
+        sSel.style.cssText = 'background:#1a1a1a;color:#ddd;border:1px solid #333;border-radius:3px;padding:1px 2px;font-size:0.75em;width:34px';
+        suits.forEach(function(sv) {
+          var o = document.createElement('option'); o.value = sv[0]; o.textContent = sv[1];
+          if (sv[0]==='h'||sv[0]==='d') o.style.color='#c04040';
+          if (presetBoard[idx] && presetBoard[idx][1] === sv[0]) o.selected = true;
+          sSel.appendChild(o);
+        });
+        sSel.disabled = !presetBoard[idx];
+
+        function sync() {
+          if (rSel.value === '') { presetBoard[idx] = null; sSel.disabled = true; }
+          else { sSel.disabled = false; presetBoard[idx] = rSel.value + sSel.value; }
+        }
+        rSel.onchange = sync; sSel.onchange = sync;
+
+        wrap.appendChild(lbl); wrap.appendChild(rSel); wrap.appendChild(sSel);
+        container.appendChild(wrap);
+      })(i);
+    }
+  }
+
   function toggleDebug() {
     debugMode = !debugMode;
     var btn = $('debug-btn');
+    var panel = $('board-preset');
     if (debugMode) {
       btn.textContent = '🔍 Debug: On';
       btn.style.color = '#f0c040';
       btn.style.borderColor = '#f0c040';
+      panel.style.display = 'block';
+      buildPresetUI();
     } else {
       btn.textContent = '🔍 Debug: Off';
       btn.style.color = '#555';
       btn.style.borderColor = '#1a5c2e';
+      panel.style.display = 'none';
+      presetBoard = [null,null,null,null,null];
     }
     if (G && G.hole[0]) { renderHole(0, debugMode); renderHole(1, debugMode); }
   }
@@ -3421,7 +3489,7 @@ var RP = (function() {
       setupTurnListener();
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
-      $('debug-btn').style.display = 'none';
+      $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
       newMatch({ startStack: startStack, timeLimit: timeLimit, names: [hostName, guest.name], evSplit: evSplit });
     });
   }
@@ -3460,7 +3528,7 @@ var RP = (function() {
         setupTurnListener();
         $('setup-screen').style.display = 'none';
         $('game-screen').style.display  = 'flex';
-        $('debug-btn').style.display = 'none';
+        $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
         newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
         return;
       }
@@ -3482,7 +3550,7 @@ var RP = (function() {
 
       $('setup-screen').style.display = 'none';
       $('game-screen').style.display  = 'flex';
-      $('debug-btn').style.display = 'none';
+      $('debug-btn').style.display = 'none'; $('board-preset').style.display = 'none';
       // newMatch creates G and calls dealHand(), which returns early for the guest
       newMatch({ startStack: cfg.startStack, timeLimit: cfg.timeLimit, names: [cfg.p0name, guestName], evSplit: !!cfg.evSplit });
     });
