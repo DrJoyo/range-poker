@@ -223,6 +223,7 @@ body {
 .hcs-offsuit { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr 1fr; }
 .hcs-pair    { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .hc-suit { background: #0a0f0a; position: relative; }
+.hcs-single { grid-template-columns: 1fr; grid-template-rows: 1fr; }
 .hc.drag-sel { z-index: 3; }
 .hc-suit.drag-sel::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,0.36); pointer-events:none; z-index:4; }
 .hc-chart-svg { position:absolute; inset:0; pointer-events:none; z-index:10; }
@@ -766,7 +767,9 @@ body {
     <select class="gamemode-select" id="cfg-gamemode">
       <option value="nlhe">No Limit Hold'em</option>
       <option value="sd">Short Deck Hold'em</option>
-      <option value="cta">Crack the Aces</option>
+      <option value="cta">Aces Cracked</option>
+      <option value="hollywood">Hollywood</option>
+      <option value="halfhollywood">Half Hollywood</option>
     </select>
   </div>
 
@@ -1106,7 +1109,17 @@ var RP = (function() {
   var CLR   = {s:'black', h:'red', d:'red', c:'black'};
   var RVAL  = {A:14,K:13,Q:12,J:11,T:10,9:9,8:8,7:7,6:6,5:5,4:4,3:3,2:2};
   var RANKS_SD = ['A','K','Q','J','T','9','8','7','6'];
-  var activeMode = 'nlhe'; // 'nlhe' | 'sd'
+
+  // Half Hollywood: 4-row (suit) × 13-col (rank) individual-card chart
+  var HH_RANKS = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+  var HH_SUITS = ['s','h','d','c']; // rows: ♠♥♦♣
+  function hhCard(r,c) { return HH_RANKS[c]+HH_SUITS[r]; }
+  function cardToHHRC(card) { return {r:HH_SUITS.indexOf(card[1]),c:HH_RANKS.indexOf(card[0])}; }
+  function isHHBlocked(card) {
+    return (G.faceUp[0]&&card===G.faceUp[0])||(G.faceUp[1]&&card===G.faceUp[1])||G.board.indexOf(card)>=0;
+  }
+
+  var activeMode = 'nlhe'; // 'nlhe' | 'sd' | 'cta' | 'hollywood' | 'halfhollywood'
   var activeGridN  = 13;
   var SCLR  = {s:'#9ab',h:'#e74c3c',d:'#e74c3c',c:'#9ab'};
 
@@ -1217,8 +1230,8 @@ var RP = (function() {
   function evalHand(cards) {
     if (cards.length===5) return eval5(cards);
     var best=null;
-    var n=cards.length; // 6 (turn) or 7 (river) — pick best 5
-    var skip = n===7 ? 2 : 1;
+    var n=cards.length; // 6+ cards — pick best 5
+    var skip = n - 5;
     function iter(start, excluded) {
       if (excluded.length===skip) {
         var five=cards.filter((_,k)=>!excluded.includes(k));
@@ -1332,7 +1345,7 @@ var RP = (function() {
 
   function evalHandSD(cards) {
     if (cards.length===5) return eval5SD(cards);
-    var best=null, n=cards.length, skip=n===7?2:1;
+    var best=null, n=cards.length, skip=n-5;
     function iter(start,excluded) {
       if (excluded.length===skip) {
         var five=cards.filter((_,k)=>!excluded.includes(k));
@@ -1432,7 +1445,9 @@ var RP = (function() {
       dealer: Math.random()<0.5?0:1,  // dealer = SB in HU
       // per-hand
       deck: [],
-      hole: [null,null],       // [card1,card2] per player
+      hole: [null,null],       // face-down cards: [c1,c2] NLHE/Hollywood, [c1] HalfHollywood
+      faceUp: [null,null],     // Hollywood/HalfHollywood: one face-up card per player
+      hhRanges: [null,null],   // HalfHollywood: {cardStr: action}; null in other modes
       board: [],               // community cards
       pot: 0,
       bets: [0,0],
@@ -1505,12 +1520,26 @@ var RP = (function() {
       G.deck = G.deck.filter(function(c){ return c !== 'As' && c !== 'Ah'; });
       G.hole[ctaBB] = ['As', 'Ah'];
       G.hole[G.dealer] = [G.deck.pop(), G.deck.pop()];
+      G.faceUp = [null, null];
       // Rebuild charts: BB gets 1×1 (only AA), SB gets full grid
       buildChart(ctaBB, true);
       buildChart(G.dealer, false);
+    } else if (activeMode === 'hollywood') {
+      // Each player gets 2 face-down cards then 1 face-up card
+      G.hole[0] = [G.deck.pop(), G.deck.pop()];
+      G.hole[1] = [G.deck.pop(), G.deck.pop()];
+      G.faceUp[0] = G.deck.pop();
+      G.faceUp[1] = G.deck.pop();
+    } else if (activeMode === 'halfhollywood') {
+      // Each player gets 1 face-down card and 1 face-up card
+      G.hole[0] = [G.deck.pop()];
+      G.hole[1] = [G.deck.pop()];
+      G.faceUp[0] = G.deck.pop();
+      G.faceUp[1] = G.deck.pop();
     } else {
       G.hole[0] = [G.deck.pop(), G.deck.pop()];
       G.hole[1] = [G.deck.pop(), G.deck.pop()];
+      G.faceUp = [null, null];
     }
     if (onlineMode) writeHandToFirebase();
     startHandUI();
@@ -1535,8 +1564,25 @@ var RP = (function() {
   function renderHole(pid, reveal) {
     var el=$('hc'+pid);
     el.innerHTML='';
-    if (!G.hole[pid]) { el.appendChild(makeCard('',true)); el.appendChild(makeCard('',true)); return; }
-    for (var c of G.hole[pid]) el.appendChild(makeCard(c, !reveal));
+    if (!G.hole[pid]) {
+      el.appendChild(makeCard('',true)); el.appendChild(makeCard('',true));
+      if (activeMode==='hollywood') el.appendChild(makeCard('',true));
+      return;
+    }
+    if ((activeMode==='hollywood'||activeMode==='halfhollywood') && G.faceUp && G.faceUp[pid]) {
+      var fu=makeCard(G.faceUp[pid], false); // face-up card is always visible
+      if (pid===0) {
+        // P0: face-down card(s) on left, face-up on right
+        for (var hc of G.hole[pid]) el.appendChild(makeCard(hc, !reveal));
+        el.appendChild(fu);
+      } else {
+        // P1: face-up on left, face-down card(s) on right
+        el.appendChild(fu);
+        for (var hc of G.hole[pid]) el.appendChild(makeCard(hc, !reveal));
+      }
+    } else {
+      for (var hc of G.hole[pid]) el.appendChild(makeCard(hc, !reveal));
+    }
   }
 
   function renderBoard(newFrom) {
@@ -1660,9 +1706,27 @@ var RP = (function() {
   function initRange(pid) {
     var facing = isFacing(pid);
     var defAction = facing ? 'fold' : 'check';
-    // Only exclude board cards (public info). Opponent hole cards are hidden
-    // so excluding them would leak info and reduce count from 1326 to 1225.
+
+    // Half Hollywood: flat single-card range map
+    if (activeMode === 'halfhollywood') {
+      var excSet = new Set([G.faceUp[0], G.faceUp[1]].concat(G.board));
+      G.hhRanges[pid] = {};
+      for (var r=0;r<4;r++) for (var c=0;c<13;c++) {
+        var card = hhCard(r,c);
+        if (excSet.has(card)) continue;
+        if (G.narrowed[pid] !== null && !G.narrowed[pid].has(card)) continue;
+        G.hhRanges[pid][card] = defAction;
+      }
+      return;
+    }
+
+    // Exclude board cards and, in Hollywood, both players' face-up cards (public).
+    // Opponent face-down cards are hidden — never exclude them.
     var excluded = [...G.board];
+    if ((activeMode==='hollywood'||activeMode==='halfhollywood') && G.faceUp) {
+      if (G.faceUp[0]) excluded.push(G.faceUp[0]);
+      if (G.faceUp[1]) excluded.push(G.faceUp[1]);
+    }
     G.ranges[pid] = [];
     for (var r=0;r<activeGridN;r++) {
       G.ranges[pid][r]=[];
@@ -1709,6 +1773,25 @@ var RP = (function() {
   // ---- Chart rendering ----
   function colorChart(pid, isActive) {
     var chart=$('chart'+pid);
+    if (activeMode==='halfhollywood') {
+      chart.querySelectorAll('.hc').forEach(function(cell) {
+        var r=+cell.dataset.r, c=+cell.dataset.c;
+        var card=hhCard(r,c);
+        var blocked=isHHBlocked(card);
+        var inRange=!blocked && G.hhRanges[pid] && (card in G.hhRanges[pid]);
+        var sr=cell.querySelector('.hc-suit');
+        if (!sr) return;
+        if (!inRange) {
+          sr.style.background = (!blocked && earlyFolded[pid].has(card)) ? '#172540' : '#0a0f0a';
+        } else if (isActive) {
+          sr.style.background = actionColor(G.hhRanges[pid][card]);
+        } else {
+          var inNarrowed=G.narrowed[pid]===null || (G.narrowed[pid] && G.narrowed[pid].has(card));
+          sr.style.background = inNarrowed ? '#7d6608' : '#0a0f0a';
+        }
+      });
+      return;
+    }
     chart.querySelectorAll('.hc').forEach(function(cell) {
       var r=+cell.dataset.r, c=+cell.dataset.c;
       var type=cellType(r,c);
@@ -1736,6 +1819,13 @@ var RP = (function() {
 
   function updateRangeSum(pid) {
     var el=$('rsum'+pid);
+    if (activeMode==='halfhollywood') {
+      if (G.hhRanges[pid]) {
+        var n=Object.keys(G.hhRanges[pid]).length;
+        el.textContent=n+(G.narrowed[pid]!==null?' cards in range':' cards');
+      } else { el.textContent=''; }
+      return;
+    }
     if (G.ranges[pid]) {
       var n=0;
       for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++) {
@@ -1753,12 +1843,19 @@ var RP = (function() {
     if (!distEl||!barEl) return;
     var counts={};
     var total=0;
-    for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
-      var map=G.ranges[pid][r][c];
-      for (var ck in map) {
-        var a=map[ck];
-        counts[a]=(counts[a]||0)+1;
-        total++;
+    if (activeMode==='halfhollywood') {
+      if (G.hhRanges[pid]) for (var card in G.hhRanges[pid]) {
+        var a=G.hhRanges[pid][card];
+        counts[a]=(counts[a]||0)+1; total++;
+      }
+    } else {
+      for (var r=0;r<activeGridN;r++) for (var c=0;c<activeGridN;c++) {
+        var map=G.ranges[pid][r][c];
+        for (var ck in map) {
+          var a=map[ck];
+          counts[a]=(counts[a]||0)+1;
+          total++;
+        }
       }
     }
     // Include early-folded combos in the fold count so stripping them doesn't
@@ -1802,20 +1899,27 @@ var RP = (function() {
   function computeSplitFreqs(pid, gidx) {
     var isActive=(pid===G.actPid);
     var facing=isFacing(pid);
+    var combosKey=(activeMode==='hollywood'||activeMode==='halfhollywood')?(pid===0?'combos0':'combos1'):'combos';
     var total=0;
-    comboStrengthGroups.forEach(function(g){ total+=g.combos.length; });
+    comboStrengthGroups.forEach(function(g){ total+=g[combosKey].length; });
     var left={fold:0,passive:0,aggr:0,inrange:0,notInRange:0,total:0};
     var right={fold:0,passive:0,aggr:0,inrange:0,notInRange:0,total:0};
     comboStrengthGroups.forEach(function(group,gi){
       var side=gi<=gidx?left:right;
-      side.total+=group.combos.length;
-      group.combos.forEach(function(ck){
-        var rc=comboToRC(ck);
+      side.total+=group[combosKey].length;
+      group[combosKey].forEach(function(ck){
         var inNarrowed=G.narrowed[pid]===null||(G.narrowed[pid]&&G.narrowed[pid].has(ck));
-        if (isActive&&G.ranges[pid]) {
-          var cmap=G.ranges[pid][rc.r][rc.c];
-          if (ck in cmap) {
-            var action=cmap[ck]||(facing?'fold':'check');
+        if (isActive) {
+          var action;
+          if (activeMode==='halfhollywood') {
+            action=G.hhRanges[pid]&&G.hhRanges[pid][ck];
+          } else {
+            var rc=comboToRC(ck);
+            var cmap=G.ranges[pid]&&G.ranges[pid][rc.r][rc.c];
+            action=cmap&&cmap[ck];
+          }
+          if (action!==undefined) {
+            action=action||(facing?'fold':'check');
             if (action==='raise'||action==='bet') side.aggr++;
             else if (action==='call'||action==='check') side.passive++;
             else side.fold++;
@@ -1933,7 +2037,7 @@ var RP = (function() {
   }
 
   function comboLabel(c1, c2, ba, board) {
-    var isRiver=board.length===5;
+    var isRiver=board.length>=5; // 5 for NLHE/SD, 6 for Hollywood (face-up + 5 community)
     var pnames=['Top Pair','2nd Pair','3rd Pair','4th Pair','5th Pair'];
     if (ba.hasBoardQuads) return 'Nothing';
     if (ba.hasBoardFH) {
@@ -2018,6 +2122,80 @@ var RP = (function() {
 
   function buildComboStrengthIndex() {
     if (!G.board||G.board.length===0) { comboStrengthGroups=null; return; }
+
+    if (activeMode==='halfhollywood') {
+      // Score each non-blocked card as a 2-card hand [card, faceUp[p]] vs community board
+      var board0=[G.faceUp[0]].concat(G.board);
+      var board1=[G.faceUp[1]].concat(G.board);
+      var excSet=new Set([G.faceUp[0],G.faceUp[1]].concat(G.board));
+      var allEntries=[];
+      for (var ri=0;ri<4;ri++) for (var ci=0;ci<13;ci++) {
+        var card=hhCard(ri,ci);
+        if (excSet.has(card)) continue;
+        var s0=activeEvalHand([card,G.faceUp[0]].concat(G.board)).rank;
+        var s1=activeEvalHand([card,G.faceUp[1]].concat(G.board)).rank;
+        allEntries.push({ck:card,s0:s0,s1:s1});
+      }
+      var scoreSet=new Set();
+      allEntries.forEach(function(e){ scoreSet.add(e.s0); scoreSet.add(e.s1); });
+      var sortedScores=Array.from(scoreSet).sort(function(a,b){return a-b;});
+      var scoreToGrp={};
+      sortedScores.forEach(function(s){ scoreToGrp[s]={score:s,combos0:[],combos1:[],label0:'',label1:'',label:''}; });
+      allEntries.forEach(function(e){ scoreToGrp[e.s0].combos0.push(e.ck); scoreToGrp[e.s1].combos1.push(e.ck); });
+      // Labels use community board only (face-up card is a hole card, not a board card).
+      // Using the extended board0/board1 here would double-count the face-up card's suit.
+      var ba=boardAnalysis(G.board);
+      sortedScores.forEach(function(s){
+        var g=scoreToGrp[s];
+        if (g.combos0.length) { var k=g.combos0[0]; g.label0=comboLabel(k,G.faceUp[0],ba,G.board); }
+        if (g.combos1.length) { var k=g.combos1[0]; g.label1=comboLabel(k,G.faceUp[1],ba,G.board); }
+        g.label=g.label0||g.label1;
+        g.combos=g.combos0.concat(g.combos1);
+      });
+      comboStrengthGroups=sortedScores.map(function(s){return scoreToGrp[s];})
+        .filter(function(g){return g.combos0.length||g.combos1.length;});
+      return;
+    }
+
+    if (activeMode==='hollywood') {
+      var board0=[G.faceUp[0]].concat(G.board);
+      var board1=[G.faceUp[1]].concat(G.board);
+      var excSet=new Set([G.faceUp[0],G.faceUp[1]].concat(G.board));
+      // Score every valid combo on both boards, collect all unique scores
+      var allEntries=[];
+      for (var ri=0;ri<activeGridN;ri++) for (var ci=0;ci<activeGridN;ci++) {
+        var type=cellType(ri,ci);
+        for (var suit of typeSuits(type)) {
+          var ck=htSuitKey(ri,ci,suit);
+          var c1=ck.slice(0,2), c2=ck.slice(2,4);
+          if (excSet.has(c1)||excSet.has(c2)) continue;
+          var s0=activeEvalHand([c1,c2].concat(board0)).rank;
+          var s1=activeEvalHand([c1,c2].concat(board1)).rank;
+          allEntries.push({ck:ck,s0:s0,s1:s1});
+        }
+      }
+      // Build a sorted list of all unique scores across both boards
+      var scoreSet=new Set();
+      allEntries.forEach(function(e){ scoreSet.add(e.s0); scoreSet.add(e.s1); });
+      var sortedScores=Array.from(scoreSet).sort(function(a,b){return a-b;});
+      // Build one group per unique score
+      var scoreToGrp={};
+      sortedScores.forEach(function(s){ scoreToGrp[s]={score:s,combos0:[],combos1:[],label0:'',label1:'',label:''}; });
+      allEntries.forEach(function(e){ scoreToGrp[e.s0].combos0.push(e.ck); scoreToGrp[e.s1].combos1.push(e.ck); });
+      // Compute per-board labels from the first combo in each group
+      var ba0=boardAnalysis(board0), ba1=boardAnalysis(board1);
+      sortedScores.forEach(function(s){
+        var g=scoreToGrp[s];
+        if (g.combos0.length) { var k=g.combos0[0]; g.label0=comboLabel(k.slice(0,2),k.slice(2,4),ba0,board0); }
+        if (g.combos1.length) { var k=g.combos1[0]; g.label1=comboLabel(k.slice(0,2),k.slice(2,4),ba1,board1); }
+        g.label=g.label0||g.label1;
+        g.combos=g.combos0.concat(g.combos1); // combined; used for total width
+      });
+      comboStrengthGroups=sortedScores.map(function(s){return scoreToGrp[s];})
+        .filter(function(g){return g.combos0.length||g.combos1.length;});
+      return;
+    }
+
     var boardSet=new Set(G.board);
     var scored=[];
     for (var ri=0;ri<activeGridN;ri++) {
@@ -2050,6 +2228,7 @@ var RP = (function() {
   }
 
   function renderStrengthBarsInto(bar0, bar1) {
+    var hw=(activeMode==='hollywood'||activeMode==='halfhollywood');
     for (var p=0;p<2;p++) {
       var barEl=p===0?bar0:bar1;
       if (!barEl) continue;
@@ -2057,14 +2236,26 @@ var RP = (function() {
       var facing=isFacing(p);
       var html='';
       comboStrengthGroups.forEach(function(group,gi){
+        // Hollywood / HalfHollywood: each player's bar uses their own combo set and label
+        var combosP=hw?(p===0?group.combos0:group.combos1):group.combos;
+        var labelP=hw?(p===0?group.label0:group.label1):group.label;
+        // Column width is always the full combined count so both bars share the same x-axis
+        var colWidth=hw?group.combos.length:group.combos.length;
         var raiseN=0,callN=0,foldN=0,notInRangeN=0,inrangeN=0;
-        group.combos.forEach(function(ck){
-          var rc=comboToRC(ck);
+        var hhMode=(activeMode==='hollywood'||activeMode==='halfhollywood');
+        combosP.forEach(function(ck){
           var inNarrowed=G.narrowed[p]===null||(G.narrowed[p]&&G.narrowed[p].has(ck));
-          if (isActive&&G.ranges[p]) {
-            var map=G.ranges[p][rc.r][rc.c];
-            if (ck in map) {
-              var action=map[ck]||(facing?'fold':'check');
+          if (isActive) {
+            var action;
+            if (activeMode==='halfhollywood') {
+              action=G.hhRanges[p]&&G.hhRanges[p][ck];
+            } else {
+              var rc=comboToRC(ck);
+              var map=G.ranges[p]&&G.ranges[p][rc.r][rc.c];
+              action=map&&map[ck];
+            }
+            if (action!==undefined) {
+              action=action||(facing?'fold':'check');
               if (action==='raise'||action==='bet') raiseN++;
               else if (action==='call'||action==='check') callN++;
               else foldN++;
@@ -2073,7 +2264,11 @@ var RP = (function() {
             if (inNarrowed) inrangeN++; else notInRangeN++;
           }
         });
+        // In Hollywood, fill any leftover column space (other player's combos) as transparent
+        var filledN=raiseN+callN+foldN+notInRangeN+inrangeN;
+        var emptyN=hw?Math.max(0,colWidth-filledN):0;
         var inner='';
+        if (emptyN) inner+='<div style="flex:'+emptyN+'"></div>';
         if (isActive) {
           if (notInRangeN) inner+='<div style="flex:'+notInRangeN+';background:#111"></div>';
           if (foldN)       inner+='<div style="flex:'+foldN+';background:#2d5070"></div>';
@@ -2083,7 +2278,7 @@ var RP = (function() {
           if (notInRangeN) inner+='<div style="flex:'+notInRangeN+';background:#111"></div>';
           if (inrangeN)    inner+='<div style="flex:'+inrangeN+';background:#666"></div>';
         }
-        html+='<div data-label="'+group.label+'" data-gidx="'+gi+'" style="flex:'+group.combos.length+';display:flex;flex-direction:column;overflow:hidden">'+inner+'</div>';
+        html+='<div data-label="'+labelP+'" data-gidx="'+gi+'" style="flex:'+colWidth+';display:flex;flex-direction:column;overflow:hidden">'+inner+'</div>';
       });
       barEl.innerHTML=html;
     }
@@ -2105,6 +2300,35 @@ var RP = (function() {
   // Build chart cells (once per hand)
   function buildChart(pid, isCTABB) {
     var chart=$('chart'+pid);
+    // HH: 4 suit rows × 13 rank cols of individual cards
+    if (activeMode==='halfhollywood') {
+      chart.style.gridTemplateColumns='repeat(13, 37px)';
+      chart.style.gridTemplateRows='repeat(4, 47px)';
+      chart.innerHTML='';
+      for (var r=0;r<4;r++) for (var c=0;c<13;c++) {
+        var cell=document.createElement('div');
+        cell.className='hc';
+        cell.dataset.r=r; cell.dataset.c=c;
+        cell.dataset.dragsel='0';
+        var lbl=document.createElement('div');
+        lbl.className='hc-label';
+        lbl.textContent=HH_RANKS[c]+['♠','♥','♦','♣'][r];
+        cell.appendChild(lbl);
+        var sg=document.createElement('div');
+        sg.className='hc-suits hcs-single';
+        var sr=document.createElement('div');
+        sr.className='hc-suit';
+        sg.appendChild(sr);
+        cell.appendChild(sg);
+        chart.appendChild(cell);
+      }
+      var ov=document.createElementNS('http://www.w3.org/2000/svg','svg');
+      ov.setAttribute('class','hc-chart-svg');
+      ov.setAttribute('width','100%');
+      ov.setAttribute('height','100%');
+      chart.appendChild(ov);
+      return;
+    }
     var n = isCTABB ? 1 : activeGridN;
     chart.style.gridTemplateColumns='repeat('+n+', 37px)';
     chart.style.gridTemplateRows='repeat('+n+', 47px)';
@@ -2147,6 +2371,11 @@ var RP = (function() {
   ];
 
   function filteredCombosForCell(pid, r, c) {
+    if (activeMode==='halfhollywood') {
+      if (r>=4) return [];
+      var card=hhCard(r,c);
+      return (G.hhRanges[pid] && card in G.hhRanges[pid]) ? [card] : [];
+    }
     var map=G.ranges[pid][r][c];
     var type=cellType(r,c);
     var filter=suitFilter[type];
@@ -2166,7 +2395,8 @@ var RP = (function() {
 
   function selectAll() {
     var pid=G.actPid;
-    for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++){
+    var rows=activeMode==='halfhollywood'?4:activeGridN;
+    for(var r=0;r<rows;r++) for(var c=0;c<activeGridN;c++){
       var cks=filteredCombosForCell(pid,r,c);
       for(var i=0;i<cks.length;i++) drag.cells.add(cks[i]);
     }
@@ -2247,6 +2477,34 @@ var RP = (function() {
     var pid=G.actPid;
     var chartSvg=chart.querySelector('.hc-chart-svg');
     if(chartSvg) chartSvg.innerHTML='';
+    if (activeMode==='halfhollywood') {
+      chart.querySelectorAll('.hc').forEach(function(cell){
+        var r=+cell.dataset.r, c=+cell.dataset.c;
+        var on=drag.cells.has(hhCard(r,c));
+        var sr=cell.querySelector('.hc-suit');
+        if(sr){ if(on) sr.classList.add('drag-sel'); else sr.classList.remove('drag-sel'); }
+        cell.dataset.dragsel=on?'1':'0';
+        if(on) cell.classList.add('drag-sel'); else cell.classList.remove('drag-sel');
+        if(on && chartSvg) {
+          var cLeft=1+c*38, sTop=1+r*48+12;
+          function al(ax,ay,bx,by){
+            var l=document.createElementNS('http://www.w3.org/2000/svg','line');
+            l.setAttribute('x1',ax);l.setAttribute('y1',ay);l.setAttribute('x2',bx);l.setAttribute('y2',by);
+            chartSvg.appendChild(l);
+          }
+          al(cLeft,sTop,cLeft+37,sTop);
+          al(cLeft,sTop+35,cLeft+37,sTop+35);
+          al(cLeft,sTop,cLeft,sTop+35);
+          al(cLeft+37,sTop,cLeft+37,sTop+35);
+        }
+      });
+      var btn=$('sel-all-btn');
+      if(btn){
+        if(drag.cells.size===0){ btn.innerHTML='+<br>Select All'; btn.style.color=''; }
+        else { btn.innerHTML='✕<br>Deselect All'; btn.style.color='#c0392b'; }
+      }
+      return;
+    }
     chart.querySelectorAll('.hc').forEach(function(cell){
       var r=+cell.dataset.r, c=+cell.dataset.c;
       var type=cellType(r,c);
@@ -2640,6 +2898,11 @@ var RP = (function() {
 
     // All combos in current range → callback(c1, c2)
     function eachCombo(fn) {
+      if (activeMode==='halfhollywood') {
+        var fu=G.faceUp[pid];
+        if (G.hhRanges[pid]) for (var card in G.hhRanges[pid]) fn(card, fu);
+        return;
+      }
       for(var row=0;row<activeGridN;row++) for(var col=0;col<activeGridN;col++){
         var map=G.ranges[pid][row][col];
         var type=cellType(row,col);
@@ -2795,13 +3058,22 @@ var RP = (function() {
 
   function selectCategory(catId, ba, board) {
     var pid=G.actPid;
-    for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++){
-      var map=G.ranges[pid][r][c];
-      var type=cellType(r,c);
-      for(var suit of typeSuits(type)){
-        var ck=htSuitKey(r,c,suit);
-        if(!(ck in map)) continue;
-        if(matchesCategory(ck.slice(0,2),ck.slice(2,4),catId,ba,board)) drag.cells.add(ck);
+    if (activeMode==='halfhollywood') {
+      var fu=G.faceUp[pid];
+      for(var r=0;r<4;r++) for(var c=0;c<13;c++){
+        var card=hhCard(r,c);
+        if(!G.hhRanges[pid]||!(card in G.hhRanges[pid])) continue;
+        if(matchesCategory(card,fu,catId,ba,board)) drag.cells.add(card);
+      }
+    } else {
+      for(var r=0;r<activeGridN;r++) for(var c=0;c<activeGridN;c++){
+        var map=G.ranges[pid][r][c];
+        var type=cellType(r,c);
+        for(var suit of typeSuits(type)){
+          var ck=htSuitKey(r,c,suit);
+          if(!(ck in map)) continue;
+          if(matchesCategory(ck.slice(0,2),ck.slice(2,4),catId,ba,board)) drag.cells.add(ck);
+        }
       }
     }
     refreshDragHighlight();
@@ -2818,11 +3090,13 @@ var RP = (function() {
     var body=$('ht-body');
     if(!body||!G) return;
     body.innerHTML='';
-    if(!G.board||G.board.length===0){
+    var board = (activeMode==='hollywood' && G.faceUp && G.faceUp[G.actPid])
+      ? [G.faceUp[G.actPid]].concat(G.board)
+      : G.board;
+    if(!board||board.length===0){
       body.innerHTML='<span style="font-size:0.63em;color:#555">No categories preflop</span>';
       return;
     }
-    var board=G.board;
     var ba=boardAnalysis(board);
     var cats=getHandCategories(G.actPid,board);
     if(cats.length===0){
@@ -2873,6 +3147,7 @@ var RP = (function() {
     }
 
     $('action-prompt').textContent=G.cfg.names[pid]+': select hands then assign action';
+    $('suit-filter').style.display = activeMode==='halfhollywood' ? 'none' : '';
     updateBetUI(pid);
     buildHandTypePanel();
     updateRandomizeUI(facing, facingAllIn);
@@ -2954,11 +3229,20 @@ var RP = (function() {
   // ---- Assign selection ----
   function assignSelection(pid, action) {
     var delta = {};
-    drag.cells.forEach(function(ck) {
-      var rc=comboToRC(ck);
-      var map=G.ranges[pid][rc.r][rc.c];
-      if (ck in map) { delta[ck]=map[ck]; map[ck]=action; }
-    });
+    if (activeMode==='halfhollywood') {
+      drag.cells.forEach(function(card) {
+        if (G.hhRanges[pid] && card in G.hhRanges[pid]) {
+          delta[card]=G.hhRanges[pid][card];
+          G.hhRanges[pid][card]=action;
+        }
+      });
+    } else {
+      drag.cells.forEach(function(ck) {
+        var rc=comboToRC(ck);
+        var map=G.ranges[pid][rc.r][rc.c];
+        if (ck in map) { delta[ck]=map[ck]; map[ck]=action; }
+      });
+    }
     if (Object.keys(delta).length > 0) {
       undoStack.push({ pid: pid, delta: delta });
       $('undo-btn').disabled=false;
@@ -2974,11 +3258,17 @@ var RP = (function() {
     if (undoStack.length === 0) return;
     var entry = undoStack.pop();
     var pid = entry.pid;
-    for (var r = 0; r < activeGridN; r++) {
-      for (var c = 0; c < activeGridN; c++) {
-        var map = G.ranges[pid][r][c];
-        for (var ck in map) {
-          if (ck in entry.delta) map[ck] = entry.delta[ck];
+    if (activeMode==='halfhollywood') {
+      for (var card in G.hhRanges[pid]) {
+        if (card in entry.delta) G.hhRanges[pid][card] = entry.delta[card];
+      }
+    } else {
+      for (var r = 0; r < activeGridN; r++) {
+        for (var c = 0; c < activeGridN; c++) {
+          var map = G.ranges[pid][r][c];
+          for (var ck in map) {
+            if (ck in entry.delta) map[ck] = entry.delta[ck];
+          }
         }
       }
     }
@@ -3065,18 +3355,28 @@ var RP = (function() {
 
     var delta = {};
     drag.cells.forEach(function(ck) {
-      var rc = comboToRC(ck);
-      var map = G.ranges[pid][rc.r][rc.c];
-      if (!(ck in map)) return;
-      delta[ck] = map[ck];
       var roll = Math.random() * 100;
-      if (facing) {
-        if (roll < callPct) map[ck] = 'call';
-        else if (roll < callPct + raisePct) map[ck] = 'raise';
-        else map[ck] = 'fold';
+      if (activeMode==='halfhollywood') {
+        if (!G.hhRanges[pid] || !(ck in G.hhRanges[pid])) return;
+        delta[ck] = G.hhRanges[pid][ck];
+        if (facing) {
+          G.hhRanges[pid][ck] = roll < callPct ? 'call' : roll < callPct+raisePct ? 'raise' : 'fold';
+        } else {
+          G.hhRanges[pid][ck] = roll < betPct ? (G.curBetTo>0?'raise':'bet') : 'check';
+        }
       } else {
-        if (roll < betPct) map[ck] = G.curBetTo > 0 ? 'raise' : 'bet';
-        else map[ck] = 'check';
+        var rc = comboToRC(ck);
+        var map = G.ranges[pid][rc.r][rc.c];
+        if (!(ck in map)) return;
+        delta[ck] = map[ck];
+        if (facing) {
+          if (roll < callPct) map[ck] = 'call';
+          else if (roll < callPct + raisePct) map[ck] = 'raise';
+          else map[ck] = 'fold';
+        } else {
+          if (roll < betPct) map[ck] = G.curBetTo > 0 ? 'raise' : 'bet';
+          else map[ck] = 'check';
+        }
       }
     });
 
@@ -3092,6 +3392,27 @@ var RP = (function() {
   // ---- Fold Early ----
   function foldEarly() {
     var pid = G.actPid;
+    if (activeMode==='halfhollywood') {
+      var fdCard = G.hole[pid][0];
+      var myAction = G.hhRanges[pid] && G.hhRanges[pid][fdCard];
+      if (myAction === 'fold') {
+        submit(false);
+      } else {
+        var foldCards = Object.keys(G.hhRanges[pid]).filter(function(k){ return G.hhRanges[pid][k]==='fold'; });
+        if (foldCards.length === 0) { setMsg('No folding hands assigned.'); return; }
+        if (G.narrowed[pid] === null) {
+          var allCards = new Set(Object.keys(G.hhRanges[pid]));
+          foldCards.forEach(function(k){ allCards.delete(k); });
+          G.narrowed[pid] = allCards;
+        } else {
+          foldCards.forEach(function(k){ G.narrowed[pid].delete(k); });
+        }
+        foldCards.forEach(function(k){ earlyFolded[pid].add(k); delete G.hhRanges[pid][k]; });
+        colorChart(pid, true); updateRangeSum(pid); renderStrengthBars(); updateRangeDist(pid);
+        setMsg('Folding hands removed — continue assigning your range.');
+      }
+      return;
+    }
     var c1 = G.hole[pid][0], c2 = G.hole[pid][1];
     var ck = cKey(c1, c2);
     var ht = handType(c1, c2);
@@ -3150,7 +3471,11 @@ var RP = (function() {
   // ---- Draft & Submit ----
   function saveDraft() {
     var pid=G.actPid;
-    G.draft[pid]=JSON.parse(JSON.stringify(G.ranges[pid]));
+    if (activeMode==='halfhollywood') {
+      G.draft[pid]=JSON.parse(JSON.stringify(G.hhRanges[pid]));
+    } else {
+      G.draft[pid]=JSON.parse(JSON.stringify(G.ranges[pid]));
+    }
     G.draftBetSz[pid]=parseFloat($('bet-inp').value)||null;
     setMsg('Draft saved!');
     setTimeout(function(){ setMsg(G.cfg.names[pid]+': assign hand ranges, then submit'); }, 1200);
@@ -3165,30 +3490,42 @@ var RP = (function() {
     var betSz = fromTimer && G.draftBetSz[pid] != null
       ? G.draftBetSz[pid]
       : parseFloat($('bet-inp').value) || 1;
-    if (fromTimer&&G.draft[pid]) G.ranges[pid]=G.draft[pid];
+    if (fromTimer&&G.draft[pid]) {
+      if (activeMode==='halfhollywood') G.hhRanges[pid]=G.draft[pid];
+      else G.ranges[pid]=G.draft[pid];
+    }
 
     $('wait'+pid).textContent='';
     $('wait'+(1-pid)).textContent='';
     drag.cells=new Set();
 
-    // Find action for actual hole cards
-    var [c1,c2]=G.hole[pid];
-    var ht=handType(c1,c2);
-    var {r,c}=htCell(ht);
-    var map=G.ranges[pid][r][c];
-    var ck=cKey(c1,c2);
-    var action=map[ck]||(isFacing(pid)?'fold':'check');
-
-    // Build narrowed range: all combos that took same action
-    var narrowedSet=new Set();
-    for(var rr=0;rr<activeGridN;rr++) for(var cc=0;cc<activeGridN;cc++) {
-      var m=G.ranges[pid][rr][cc];
-      for(var k in m) {
-        if (m[k]===action) narrowedSet.add(k);
+    var action, narrowedSet=new Set();
+    if (activeMode==='halfhollywood') {
+      // Find action for actual face-down card
+      var fdCard=G.hole[pid][0];
+      action=G.hhRanges[pid][fdCard]||(isFacing(pid)?'fold':'check');
+      // Build narrowed set: all cards assigned to same action
+      for (var card in G.hhRanges[pid]) {
+        if (G.hhRanges[pid][card]===action) narrowedSet.add(card);
       }
+      if (action==='fold') earlyFolded[pid].forEach(function(k){ narrowedSet.add(k); });
+    } else {
+      // Find action for actual hole cards
+      var c1=G.hole[pid][0], c2=G.hole[pid][1];
+      var ht=handType(c1,c2);
+      var rc_=htCell(ht);
+      var map=G.ranges[pid][rc_.r][rc_.c];
+      var ck=cKey(c1,c2);
+      action=map[ck]||(isFacing(pid)?'fold':'check');
+      // Build narrowed range: all combos that took same action
+      for(var rr=0;rr<activeGridN;rr++) for(var cc=0;cc<activeGridN;cc++) {
+        var m=G.ranges[pid][rr][cc];
+        for(var k in m) {
+          if (m[k]===action) narrowedSet.add(k);
+        }
+      }
+      if (action==='fold') earlyFolded[pid].forEach(function(k){ narrowedSet.add(k); });
     }
-    // Early-folded combos were stripped from ranges but belong in the fold range
-    if (action==='fold') earlyFolded[pid].forEach(function(k){ narrowedSet.add(k); });
     G.narrowed[pid]=narrowedSet;
 
     colorChart(pid, false);
@@ -3302,6 +3639,32 @@ var RP = (function() {
   function computeRangeEV(board) {
     var boardSet = new Set(board);
 
+    // Half Hollywood: enumerate face-down single cards
+    if (activeMode==='halfhollywood') {
+      function validHHCards(pid) {
+        var narrowed=G.narrowed[pid];
+        var src=G.hhRanges[pid]?Object.keys(G.hhRanges[pid]):[];
+        return src.filter(function(c){
+          return !boardSet.has(c) && (narrowed===null||narrowed.has(c));
+        });
+      }
+      var cards0=validHHCards(0), cards1=validHHCards(1);
+      var hhRanks0=cards0.map(function(c){ return activeEvalHand([c,G.faceUp[0]].concat(board)).rank; });
+      var hhRanks1=cards1.map(function(c){ return activeEvalHand([c,G.faceUp[1]].concat(board)).rank; });
+      var wins0=0,wins1=0,ties=0;
+      for (var i=0;i<cards0.length;i++) {
+        for (var j=0;j<cards1.length;j++) {
+          // Card conflict: same face-down card, or face-down conflicts with opponent's face-up
+          if (cards0[i]===cards1[j]) continue;
+          var r0=hhRanks0[i], r1=hhRanks1[j];
+          if (r0>r1) wins0++; else if (r1>r0) wins1++; else ties++;
+        }
+      }
+      var total=wins0+wins1+ties;
+      if (total===0) return {ev0:0.5,ev1:0.5};
+      return {ev0:(wins0+ties*0.5)/total, ev1:(wins1+ties*0.5)/total};
+    }
+
     // Collect valid combos for each player from their narrowed range (or full range).
     function validCombos(pid) {
       var out = [];
@@ -3327,11 +3690,17 @@ var RP = (function() {
 
     // Pre-compute ranks for every combo before the double loop so evalHand
     // is called O(N) times instead of O(N²).
+    // Hollywood: each player's face-up card is part of their hand (best 5 from 8).
+    var hw=(activeMode==='hollywood');
     var ranks0 = combos0.map(function(ck) {
-      return activeEvalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+      var hand=[ck.slice(0,2), ck.slice(2,4)];
+      if (hw) hand.push(G.faceUp[0]);
+      return activeEvalHand(hand.concat(board)).rank;
     });
     var ranks1 = combos1.map(function(ck) {
-      return activeEvalHand([ck.slice(0,2), ck.slice(2,4)].concat(board)).rank;
+      var hand=[ck.slice(0,2), ck.slice(2,4)];
+      if (hw) hand.push(G.faceUp[1]);
+      return activeEvalHand(hand.concat(board)).rank;
     });
 
     var wins0 = 0, wins1 = 0, ties = 0;
@@ -3362,8 +3731,9 @@ var RP = (function() {
     hideActionPanel();
     renderHole(0,true); renderHole(1,true);
     var board=G.board;
-    var h0=activeEvalHand([...G.hole[0],...board]);
-    var h1=activeEvalHand([...G.hole[1],...board]);
+    var hw=(activeMode==='hollywood'), hhw=(activeMode==='halfhollywood');
+    var h0=activeEvalHand((hw||hhw?[...G.hole[0],G.faceUp[0]]:[...G.hole[0]]).concat(board));
+    var h1=activeEvalHand((hw||hhw?[...G.hole[1],G.faceUp[1]]:[...G.hole[1]]).concat(board));
     var pot=G.pot;
     var winner=-1, title, potText, sdP0class, sdP1class;
 
@@ -3403,8 +3773,16 @@ var RP = (function() {
     $('sd-h1').textContent=h1.desc;
     var c0=$('sd-c0'); c0.innerHTML='';
     var c1=$('sd-c1'); c1.innerHTML='';
-    G.hole[0].forEach(function(c){ c0.appendChild(makeCard(c,false)); });
-    G.hole[1].forEach(function(c){ c1.appendChild(makeCard(c,false)); });
+    if (hw||hhw) {
+      // P0: face-down card(s) then face-up; P1: face-up then face-down card(s)
+      G.hole[0].forEach(function(c){ c0.appendChild(makeCard(c,false)); });
+      c0.appendChild(makeCard(G.faceUp[0],false));
+      c1.appendChild(makeCard(G.faceUp[1],false));
+      G.hole[1].forEach(function(c){ c1.appendChild(makeCard(c,false)); });
+    } else {
+      G.hole[0].forEach(function(c){ c0.appendChild(makeCard(c,false)); });
+      G.hole[1].forEach(function(c){ c1.appendChild(makeCard(c,false)); });
+    }
     $('sd-pot').textContent=potText;
     $('sd-pot').className=G.cfg.evSplit?'ev-split':'';
     $('sd-p0').className=sdP0class;
@@ -3629,6 +4007,11 @@ var RP = (function() {
 
   function updateSlotsDisabled() {
     var isPreflop = G && G.street === 'preflop';
+    // HH has no range slots (single-card ranges don't benefit from slot save/load)
+    if (activeMode === 'halfhollywood') {
+      for (var pid = 0; pid < 2; pid++) { var el=$('rs'+pid); if (el) el.classList.add('pf-disabled'); }
+      return;
+    }
     for (var pid = 0; pid < 2; pid++) {
       var el = $('rs'+pid);
       if (!el) continue;
@@ -3716,6 +4099,11 @@ var RP = (function() {
 
   function encodeNarrowed(set) {
     if (set === null) return null;
+    if (activeMode==='halfhollywood') {
+      var out=[];
+      for (var r=0;r<4;r++) for (var c=0;c<13;c++) out.push(set.has(hhCard(r,c))?'1':'0');
+      return out.join('');
+    }
     var out = [];
     for (var r = 0; r < activeGridN; r++) for (var c = 0; c < activeGridN; c++) {
       var type = cellType(r, c);
@@ -3726,6 +4114,11 @@ var RP = (function() {
 
   function decodeNarrowed(str) {
     if (str === null) return null;
+    if (activeMode==='halfhollywood') {
+      var set=new Set(), idx=0;
+      for (var r=0;r<4;r++) for (var c=0;c<13;c++) { if (str[idx]==='1') set.add(hhCard(r,c)); idx++; }
+      return set;
+    }
     var set = new Set(), idx = 0;
     for (var r = 0; r < activeGridN; r++) for (var c = 0; c < activeGridN; c++) {
       var type = cellType(r, c);
@@ -4110,6 +4503,7 @@ var RP = (function() {
     processingRemoteAction = false;
     G.deck         = data.deck;
     G.hole         = [data.hole0, data.hole1];
+    G.faceUp       = [data.faceUp0 || null, data.faceUp1 || null];
     G.dealer       = data.dealer;
     G.stacks       = [data.stacks0, data.stacks1];
     G.handNum      = data.n;
@@ -4127,6 +4521,8 @@ var RP = (function() {
     $('next-btn').style.display = 'none';
     buildChart(0); buildChart(1);
     if (activeMode === 'cta') buildChart(1 - G.dealer, true); // BB gets 1×1 chart
+    // HH: hhRanges were null from newMatch — reinitialise to empty objects so colorChart doesn't crash
+    if (activeMode === 'halfhollywood') { G.hhRanges = [null, null]; }
 
     if (_isRejoin) {
       _isRejoin = false;
@@ -4220,6 +4616,8 @@ var RP = (function() {
       deck:    G.deck,
       hole0:   G.hole[0],
       hole1:   G.hole[1],
+      faceUp0: G.faceUp[0] || null,
+      faceUp1: G.faceUp[1] || null,
       stacks0: G.stacks[0],
       stacks1: G.stacks[1]
     });
