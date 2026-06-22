@@ -1,0 +1,219 @@
+RANGE POKER TRAINER — HOW TO PLAY
+==================================
+
+
+THE CORE IDEA
+-------------
+
+In this game, you never know your own cards. Instead, you play an entire range of
+possible hands at once. Each turn, you look at a grid of starting hands, select
+groups of them, and assign a poker action — fold, call, check, bet, or raise —
+to each group. The game uses your actual dealt cards (hidden from you) to determine
+which action you really took, then eliminates the hands that are inconsistent with
+that action. Over the course of the hand, both players' ranges get narrower and
+narrower, until the showdown reveals who actually had the better cards.
+
+The goal is to train yourself to think in ranges rather than reacting to one hand
+at a time. A good player asks "what should my entire range of hands do here?" —
+this game puts that question front and center on every single decision.
+
+
+GETTING STARTED
+---------------
+
+On the setup screen, pick a game mode from the dropdown at the top. The standard
+starting point is No Limit Hold'em. You can set the starting stack size, how many
+seconds each player gets per turn, and both players' names. There is also a
+"Range EV Split" checkbox — if you turn this on, the pot at showdown is split
+proportionally to each player's range equity rather than going entirely to whoever
+happened to be dealt the better hand. This is useful for longer study sessions
+where you want to remove luck from the results.
+
+Click Start Game when you're ready.
+
+
+THE SCREEN
+----------
+
+Once the game starts, you'll see two player panels, one on each side of the screen.
+Each panel has a hole card display at the top (face-down until showdown), the
+player's name and chip stack, a countdown timer bar, and below that, the hand chart.
+
+The hand chart is the main thing you interact with. It's a grid where each cell
+represents a category of starting hands. The diagonal running from top-left to
+bottom-right holds the pocket pairs (AA, KK, QQ, and so on down to 22). The
+upper-right triangle holds the suited hands (AKs, AQs, etc.) and the lower-left
+triangle holds the offsuit hands (AKo, AQo, etc.). Each cell is subdivided into
+small colored rectangles representing individual suit combinations within that
+hand type. Colors tell you what action has been assigned: red is fold, blue is
+call or check, orange is bet or raise, and dark grey means unassigned (which
+defaults to fold if facing a bet, or check if not).
+
+In the center of the screen you'll see the community cards dealt face-up on the
+board, and the current pot size. When it's your turn to act, an action panel
+appears in the center.
+
+
+TAKING YOUR TURN
+----------------
+
+When it's your turn, do the following:
+
+First, select hands on your chart. You can click and drag across cells to paint
+them (Freehand mode), or drag a rectangle to grab a whole region at once. Clicking
+a selected cell deselects it. You can also use the Hand Types panel — expand it
+with the arrow button — to select entire categories of hands at once, like "Top
+Pair" or "Flush Draw." This is usually the fastest way to build a well-structured
+range.
+
+Second, click an action button to assign that action to your selected hands. Then
+select a different group of hands and assign a different action. You can go back
+and forth as much as you like. If you make a mistake, hit Undo to revert your
+last assignment.
+
+Third, when you're satisfied with how you've split up your range, click Submit.
+The game figures out which category your actual hole cards fall into, executes
+that action, and then eliminates all the other hands from your range — the ones
+that took different actions. From that point forward, your range only contains the
+hands consistent with what you did.
+
+You have a limited amount of time per turn (shown by the timer bar). If you want
+to save your progress partway through in case time runs out, hit Save Draft. If the
+timer expires, your most recent draft is submitted automatically.
+
+
+USEFUL TOOLS
+------------
+
+FOLD EARLY — If you know you'll always fold certain hands no matter what (say,
+the weakest offsuit trash hands), you can select them and click Fold Early before
+you start assigning. This permanently removes them from your range and clears them
+off the chart so they don't clutter your view.
+
+RANDOMIZE — Expand the Randomize panel to automatically split your range by
+percentages. Set how much to call, raise, and fold (or bet and check), then click
+Randomize and the game distributes those proportions randomly across your hands.
+Good for quickly generating a mixed strategy.
+
+SUIT FILTER — Lets you restrict your assignment to specific suit combinations
+within a hand type. For example, you can select all AK combos but only assign
+the action to the suited ones by filtering for suited. Less important for beginners
+but useful for precise range construction.
+
+STRENGTH BAR — Postflop, you can switch the center panel to "Strength Bar" view.
+This shows a bar chart of all possible hands sorted weakest to strongest, colored
+by their assigned action. A balanced range has folds, calls, and raises spread
+across the hand strength spectrum rather than bunched together. Click the bar to expand
+it into a larger popup.
+
+RANGE SLOTS — On the far left and right of the screen, each player has five slots
+for saving preflop ranges. If you develop a preflop opening range you like, save
+it to a slot and load it at the start of future hands. Only available preflop.
+
+
+THE SHOWDOWN
+------------
+
+When the hand ends — either someone folds, or all streets are played out — the
+showdown overlay appears. Both players' hole cards are revealed, the winner is
+announced, and the pot is awarded. Click Next Hand to keep playing.
+
+
+---------------------------------------------------------------------
+GAME MODES
+---------------------------------------------------------------------
+
+
+NO LIMIT HOLD'EM
+----------------
+
+The standard mode. Both players get two face-down hole cards from a standard
+52-card deck. The chart has 169 hand types across a 13x13 grid, representing
+all 1326 possible starting hand combinations.
+
+Everything described above applies here. This is the best starting point if you're
+new to the game.
+
+
+SHORT DECK HOLD'EM
+------------------
+
+Played with a 36-card deck — all twos, threes, fours, and fives are removed.
+Two rules change as a result:
+
+  - A flush beats a full house (flushes are harder to make)
+  - The wheel straight is A-6-7-8-9 (since 2-3-4-5 no longer exist)
+
+The chart shrinks to a 9x9 grid with only the nine ranks from Six up to Ace,
+representing 630 possible combos. Everything else plays the same as NLHE. The
+Hand Types panel and strength bar reflect the altered hand rankings, so you'll
+see Flush listed above Full House in those panels.
+
+
+ACES CRACKED
+------------
+
+A special variant where the big blind is always dealt pocket aces — specifically
+the Ace of Spades and Ace of Hearts — and they are dealt face-up, visible to
+both players from the start of the hand.
+
+Because of this:
+  - The small blind's range automatically excludes all hands containing an ace
+  - The big blind's chart shows only a single cell (the AA cell), since that
+    is their only possible hand
+  - The big blind cannot raise preflop — they can only call or fold. If the
+    small blind limps in, the big blind may also check.
+
+Postflop, both players act normally on their respective ranges.
+
+This mode explores an unusual dynamic: how aggressively should the small blind
+play when they know exactly what their opponent holds? And how does the big
+blind maximize value postflop when their opponent can't fold them out preflop?
+
+
+HOLLYWOOD
+---------
+
+Each player gets one face-down card and one face-up card. The face-up cards are
+visible to both players for the entire hand.
+
+The chart is still the standard 13x13 grid, but it's automatically filtered to
+show only the hands that include your face-up card. If your face-up card is the
+King of Hearts, your chart only shows combinations like KK, KQ, KJ, AK, and so
+on — one card of every combo must be the K♥.
+
+Your opponent's face-up card is shown on their side of the screen at all times.
+This partial information changes the dynamic significantly: your opponent knows
+one of your cards, and you know one of theirs. Bluffing is harder because your
+opponent can already narrow down what you might be holding.
+
+Hand strength is evaluated normally — your two hole cards (one face-down, one
+face-up) plus up to five community cards.
+
+
+HALF HOLLYWOOD
+--------------
+
+Also one face-down card plus one face-up card, but the chart works completely
+differently.
+
+Instead of a 13x13 grid of hand pairs, the chart is a 4x13 grid where each cell
+represents a single specific card. The four rows are the four suits (spades,
+hearts, diamonds, clubs) and the thirteen columns are the ranks from 2 up to Ace.
+Every cell on the chart is one possible face-down card you could be holding.
+
+Some cells are blacked out — these are cards that are already visible on the
+table (either dealt face-up to a player, or already on the community board). You
+can't be holding a card that's already accounted for, so those cells are
+automatically removed from your range.
+
+When you select cells and assign actions, you're assigning based on which specific
+hidden card you might have. The game pairs each possible face-down card with your
+face-up card to determine the hand strength — so the Hand Types panel and strength
+bar treat the two cards together as a normal two-card hold'em hand.
+
+There is no suit filter in this mode (the grid is already broken down by suit),
+and range slots are not available.
+
+This mode is the most granular — instead of thinking about hand types like "AKs,"
+you're thinking about individual cards like "the seven of clubs."

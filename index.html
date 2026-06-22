@@ -895,7 +895,6 @@ body {
     <!-- CENTER (col 3) -->
     <div id="center-col">
       <div id="top-center">
-        <button class="btn-small" onclick="RP.openSettings()">⚙ Settings</button>
       </div>
       <div id="board-section">
         <div id="community-cards">
@@ -919,8 +918,8 @@ body {
         </div>
         <div id="range-dist"></div>
         <div id="bar-toggle-row">
-          <button class="bar-toggle-btn active" id="bar-toggle-freq" onclick="RP.setBarView('freq')">Action %</button>
-          <button class="bar-toggle-btn" id="bar-toggle-strength" onclick="RP.setBarView('strength')">By Strength</button>
+          <button class="bar-toggle-btn" id="bar-toggle-freq" onclick="RP.setBarView('freq')">Action %</button>
+          <button class="bar-toggle-btn active" id="bar-toggle-strength" onclick="RP.setBarView('strength')">Strength Bar</button>
         </div>
         <div id="range-dist-bar"></div>
         <div id="strength-bar-wrap" onclick="RP.toggleStrengthEnlarge(event)">
@@ -1882,7 +1881,7 @@ var RP = (function() {
 
   // ---- Strength Bar ----
   var comboStrengthGroups = null;
-  var barView = 'freq';
+  var barView = 'strength';
 
   function setBarView(v) {
     barView = v;
@@ -2025,6 +2024,7 @@ var RP = (function() {
     strengthBtn.style.opacity = available ? '' : '0.35';
     strengthBtn.style.cursor = available ? '' : 'default';
     if (!available && barView==='strength') setBarView('freq');
+    if (available) setBarView('strength');
   }
 
   function comboToRC(ck) {
@@ -3119,7 +3119,7 @@ var RP = (function() {
     if (wb.classList.contains('visible')) {
       var abtns=$('abtns');
       var ap=$('action-panel');
-      ap.insertBefore($('bar-toggle-row'), abtns);
+      ap.insertBefore($('bar-toggle-row'), $('range-dist-bar'));
       ap.insertBefore($('strength-bar-wrap'), abtns);
       wb.classList.remove('visible');
       $('bar-toggle-freq').style.display = '';
