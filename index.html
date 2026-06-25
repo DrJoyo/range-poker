@@ -690,6 +690,68 @@ body {
   text-align: center;
 }
 .gamemode-select:focus { outline: none; border-color: #f0c040; }
+.gamemode-help-btn {
+  background: #1a3a22;
+  border: 1px solid #2a5a38;
+  border-radius: 50%;
+  color: #aaa;
+  width: 22px;
+  height: 22px;
+  font-size: 0.8em;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.gamemode-help-btn:hover { background: #2a5a38; color: #fff; }
+.gamemode-help-popup {
+  position: relative;
+  width: 360px;
+  background: #0f1f10;
+  border: 1px solid #2a5a38;
+  border-radius: 10px;
+  padding: 14px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gamemode-help-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 0.95em;
+  cursor: pointer;
+  padding: 2px 5px;
+  line-height: 1;
+}
+.gamemode-help-close:hover { color: #fff; }
+.gamemode-help-entry { display: flex; flex-direction: column; gap: 2px; }
+.gamemode-help-name {
+  color: #f0c040;
+  font-size: 0.85em;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gamemode-help-desc { color: #aaa; font-size: 0.78em; line-height: 1.45; }
+.gamemode-help-tag {
+  background: #1a4a2a;
+  border: 1px solid #2a6a3a;
+  border-radius: 4px;
+  color: #6dc87a;
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 1px 5px;
+}
 .mode-tabs {
   display: flex;
   background: #0f1f10;
@@ -765,14 +827,44 @@ body {
   <h1>♠ Range Poker ♥</h1>
   <div class="gamemode-row">
     <label for="cfg-gamemode">Game Mode</label>
-    <select class="gamemode-select" id="cfg-gamemode">
-      <option value="nlhe">No Limit Hold'em</option>
-      <option value="lhe">Limit Hold'em</option>
-      <option value="sd">Short Deck Hold'em</option>
-      <option value="hollywood">Hollywood</option>
-      <option value="halfhollywood">Half Hollywood (minigame)</option>
-      <option value="cta">Aces Cracked (minigame)</option>
-    </select>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <select class="gamemode-select" id="cfg-gamemode">
+        <option value="nlhe">No Limit Hold'em</option>
+        <option value="lhe">Limit Hold'em</option>
+        <option value="sd">Short Deck Hold'em</option>
+        <option value="hollywood">Hollywood</option>
+        <option value="halfhollywood">Half Hollywood (minigame)</option>
+        <option value="cta">Aces Cracked (minigame)</option>
+      </select>
+      <button class="gamemode-help-btn" onclick="RP.toggleGamemodeHelp(event)" title="Game mode descriptions">?</button>
+    </div>
+  </div>
+  <div id="gamemode-help-popup" class="gamemode-help-popup" style="display:none;">
+    <button class="gamemode-help-close" onclick="RP.closeGamemodeHelp()">✕</button>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">No Limit Hold'em</div>
+      <div class="gamemode-help-desc">Standard heads-up No Limit Texas Hold'em with a 52-card deck. Assign actions to your full 13×13 starting hand range each street.</div>
+    </div>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">Limit Hold'em</div>
+      <div class="gamemode-help-desc">Standard Limit Texas Hold'em. Fixed bet and raise sizes. Limit of 4 bets per street.</div>
+    </div>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">Short Deck Hold'em</div>
+      <div class="gamemode-help-desc">36-card deck (6 and up). 9×9 range grid, 630 combos. Flushes beat Full Houses. Ace plays low in A-6-7-8-9 straights.</div>
+    </div>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">Hollywood</div>
+      <div class="gamemode-help-desc">Each player gets one face-up card (visible to both) and two face-down cards. Full 13×13 range grid for the face down cards.</div>
+    </div>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">Half Hollywood <span class="gamemode-help-tag">minigame</span></div>
+      <div class="gamemode-help-desc">Like Hollywood, but with only one face down card. Range chart is a 4×13 grid of single cards (one cell per possible face-down card).</div>
+    </div>
+    <div class="gamemode-help-entry">
+      <div class="gamemode-help-name">Aces Cracked <span class="gamemode-help-tag">minigame</span></div>
+      <div class="gamemode-help-desc">BB is always dealt A♠A♥ face-up and can only call or fold preflop. Practice playing SB against a known overpair or BB defending with one.</div>
+    </div>
   </div>
 
   <div class="mode-tabs">
@@ -4261,6 +4353,26 @@ var RP = (function() {
   }
 
   // ---- Lobby UI helpers ----
+  function toggleGamemodeHelp(e) {
+    e.stopPropagation();
+    var popup = $('gamemode-help-popup');
+    var isOpen = popup.style.display !== 'none';
+    popup.style.display = isOpen ? 'none' : '';
+    if (!isOpen) {
+      var dismiss = function(ev) {
+        if (!popup.contains(ev.target)) {
+          popup.style.display = 'none';
+          document.removeEventListener('click', dismiss);
+        }
+      };
+      setTimeout(function() { document.addEventListener('click', dismiss); }, 0);
+    }
+  }
+
+  function closeGamemodeHelp() {
+    $('gamemode-help-popup').style.display = 'none';
+  }
+
   function setSetupMode(mode) {
     $('local-card').style.display  = mode === 'local'  ? '' : 'none';
     $('online-card').style.display = mode === 'online' ? '' : 'none';
@@ -4726,6 +4838,8 @@ var RP = (function() {
     exportSlots: exportSlots,
     toggleImport: toggleImport,
     importSlots: importSlots,
+    toggleGamemodeHelp: toggleGamemodeHelp,
+    closeGamemodeHelp: closeGamemodeHelp,
     setSetupMode: setSetupMode,
     setOnlineSubMode: setOnlineSubMode,
     hostGame: hostGame,
