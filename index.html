@@ -218,6 +218,7 @@ body {
   line-height: 11px;
   pointer-events: none;
 }
+.hc-label-suit { font-size: 9.5px; }
 .hc-suits { flex: 1; display: grid; min-height: 0; }
 .hcs-suited  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .hcs-offsuit { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr 1fr; }
@@ -766,10 +767,11 @@ body {
     <label for="cfg-gamemode">Game Mode</label>
     <select class="gamemode-select" id="cfg-gamemode">
       <option value="nlhe">No Limit Hold'em</option>
+      <option value="lhe">Limit Hold'em</option>
       <option value="sd">Short Deck Hold'em</option>
-      <option value="cta">Aces Cracked</option>
       <option value="hollywood">Hollywood</option>
-      <option value="halfhollywood">Half Hollywood</option>
+      <option value="halfhollywood">Half Hollywood (minigame)</option>
+      <option value="cta">Aces Cracked (minigame)</option>
     </select>
   </div>
 
@@ -927,6 +929,7 @@ body {
           <div class="strength-bar" id="sbar1"></div>
         </div>
         <div class="action-btns" id="abtns"></div>
+        <div id="lhe-cap" style="display:none;text-align:center;font-size:0.82em;color:#aaa;padding:2px 0 4px"></div>
         <div class="bet-row" id="bet-row">
           <span>Size:</span>
           <input type="number" id="bet-inp" min="0.5" step="0.5" value="2">
@@ -1118,7 +1121,7 @@ var RP = (function() {
     return (G.faceUp[0]&&card===G.faceUp[0])||(G.faceUp[1]&&card===G.faceUp[1])||G.board.indexOf(card)>=0;
   }
 
-  var activeMode = 'nlhe'; // 'nlhe' | 'sd' | 'cta' | 'hollywood' | 'halfhollywood'
+  var activeMode = 'nlhe'; // 'nlhe' | 'lhe' | 'sd' | 'cta' | 'hollywood' | 'halfhollywood'
   var activeGridN  = 13;
   var SCLR  = {s:'#9ab',h:'#e74c3c',d:'#e74c3c',c:'#9ab'};
 
@@ -1458,6 +1461,7 @@ var RP = (function() {
       // bet tracking
       curBetTo: 0,
       lastRaiseAmt: 0,
+      streetBetCount: 0,
       // street tracking
       streetChecked: [false,false],
       streetActed:   [false,false],
@@ -1609,6 +1613,7 @@ var RP = (function() {
     G.curBetTo=bbAmt;
     G.lastRaiseAmt=bbAmt;
     G.pot=0;
+    if (activeMode === 'lhe') G.streetBetCount = 1; // BB's blind counts as bet #1
     addLog(G.cfg.names[sb]+' posts SB '+fmt(sbAmt)+', '+G.cfg.names[bb]+' posts BB '+fmt(bbAmt), 'log-info');
     updateUI();
   }
@@ -1629,6 +1634,7 @@ var RP = (function() {
     G.bets=[0,0];
     G.curBetTo=0;
     G.lastRaiseAmt=0;
+    G.streetBetCount=0;
     updateUI();
   }
 
@@ -1763,6 +1769,10 @@ var RP = (function() {
         }
       }
     }
+  }
+
+  function lheBetSize() {
+    return (G.street === 'turn' || G.street === 'river') ? 2 : 1;
   }
 
   function isFacing(pid) {
@@ -2312,7 +2322,7 @@ var RP = (function() {
         cell.dataset.dragsel='0';
         var lbl=document.createElement('div');
         lbl.className='hc-label';
-        lbl.textContent=HH_RANKS[c]+['♠','♥','♦','♣'][r];
+        lbl.innerHTML=HH_RANKS[c]+'<span class="hc-label-suit">'+['♠','♥','♦','♣'][r]+'</span>';
         cell.appendChild(lbl);
         var sg=document.createElement('div');
         sg.className='hc-suits hcs-single';
@@ -3141,9 +3151,18 @@ var RP = (function() {
     }
     var facingAllIn = G.stacks[1-pid] === 0 || (facing && toCall >= G.stacks[pid]);
     var ctaBBPreflop = activeMode === 'cta' && pid === ctaBBPid() && G.street === 'preflop';
-    if (!facingAllIn && !ctaBBPreflop) {
+    var lheCapped = activeMode === 'lhe' && G.streetBetCount >= 4;
+    if (!facingAllIn && !ctaBBPreflop && !lheCapped) {
       if (G.curBetTo===0) makeABtn('Bet','bet','aBtn-bet');
       else makeABtn('Raise','raise','aBtn-raise');
+    }
+
+    var lheCapEl = $('lhe-cap');
+    if (activeMode === 'lhe') {
+      lheCapEl.style.display = '';
+      lheCapEl.textContent = lheCapped ? 'Bet cap reached (4/4)' : 'Bets this street: '+G.streetBetCount+'/4';
+    } else {
+      lheCapEl.style.display = 'none';
     }
 
     $('action-prompt').textContent=G.cfg.names[pid]+': select hands then assign action';
@@ -3165,6 +3184,11 @@ var RP = (function() {
   }
 
   function updateBetUI(pid) {
+    if (activeMode === 'lhe') {
+      $('bet-row').style.display = 'none';
+      $('presets').style.display = 'none';
+      return;
+    }
     var opp = 1 - pid;
     var myStack = G.stacks[pid];
     var myBet = G.bets[pid];
@@ -3324,12 +3348,20 @@ var RP = (function() {
   function updateRandomizeUI(facing, facingAllIn) {
     $('rz-facing').style.display = facing ? '' : 'none';
     $('rz-not-facing').style.display = facing ? 'none' : '';
+    var lheCapped = activeMode === 'lhe' && G.streetBetCount >= 4;
     var raiseInp = $('rz-raise-pct');
-    if (facing && facingAllIn) {
+    if ((facing && facingAllIn) || lheCapped) {
       raiseInp.value = '0';
       raiseInp.disabled = true;
     } else {
       raiseInp.disabled = false;
+    }
+    var betInp = $('rz-bet-pct');
+    if (lheCapped) {
+      betInp.value = '0';
+      betInp.disabled = true;
+    } else {
+      betInp.disabled = false;
     }
     var limpedBB = !facing && G.curBetTo > 0;
     $('rz-bet-lbl').textContent = limpedBB ? 'Raise %' : 'Bet %';
@@ -3531,6 +3563,9 @@ var RP = (function() {
     colorChart(pid, false);
     updateRangeSum(pid);
 
+    if (activeMode === 'lhe' && (action === 'bet' || action === 'raise')) {
+      betSz = G.curBetTo + lheBetSize();
+    }
     addLog(G.cfg.names[pid]+' ('+G.street+'): '+action+(betSz&&(action==='bet'||action==='raise')?' '+fmt(betSz):''), 'log-'+action);
     setMsg(G.cfg.names[pid]+' → '+action+(action==='bet'||action==='raise'?' '+fmt(betSz):''));
 
@@ -3589,6 +3624,7 @@ var RP = (function() {
       var raiseAmt=G.bets[pid]-G.curBetTo;
       G.lastRaiseAmt=Math.max(raiseAmt, G.lastRaiseAmt);
       G.curBetTo=G.bets[pid];
+      if (activeMode === 'lhe') G.streetBetCount++;
       updateUI();
 
       if (G.stacks[pid]===0) G.allIn=true;
@@ -4427,7 +4463,7 @@ var RP = (function() {
   // ---- Silent replay helpers (used on rejoin to reconstruct mid-hand state) ----
   function silentCollectBets() {
     G.pot += G.bets[0] + G.bets[1];
-    G.bets = [0, 0]; G.curBetTo = 0; G.lastRaiseAmt = 0;
+    G.bets = [0, 0]; G.curBetTo = 0; G.lastRaiseAmt = 0; G.streetBetCount = 0;
   }
 
   function silentAdvanceStreet() {
@@ -4491,6 +4527,7 @@ var RP = (function() {
       var raiseAmt = G.bets[pid] - G.curBetTo;
       G.lastRaiseAmt = Math.max(raiseAmt, G.lastRaiseAmt);
       G.curBetTo = G.bets[pid];
+      if (activeMode === 'lhe') G.streetBetCount++;
       if (G.stacks[pid] === 0) G.allIn = true;
       G.actPid = opp;
       return;
@@ -4511,9 +4548,10 @@ var RP = (function() {
     G.allIn        = false;
     G.bets         = [0, 0];
     G.pot          = 0;
-    G.curBetTo     = 0;
-    G.lastRaiseAmt = 0;
-    G.narrowed     = [null, null];
+    G.curBetTo       = 0;
+    G.lastRaiseAmt   = 0;
+    G.streetBetCount = 0;
+    G.narrowed       = [null, null];
     G.draft        = [null, null];
     G.draftBetSz   = [null, null];
     G.pendingAction = null;
