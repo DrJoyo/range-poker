@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
 <title>Range Poker - Heads Up NLHE</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -194,6 +194,7 @@ body {
   border-radius: 3px;
   padding: 1px;
   cursor: crosshair;
+  touch-action: none;
   user-select: none;
   margin-top: 10px;
   position: relative;
@@ -2106,8 +2107,8 @@ var RP = (function() {
         var st=$('strength-stats'); if(st) st.style.display='none';
       }
       [$('sbar0-lg'),$('sbar1-lg')].forEach(function(b){
-        b.addEventListener('mousemove',onBarMove);
-        b.addEventListener('mouseleave',onBarLeave);
+        b.addEventListener('pointermove',onBarMove);
+        b.addEventListener('pointerleave',onBarLeave);
       });
     }
     function dismiss() {
@@ -2522,11 +2523,12 @@ var RP = (function() {
     chart.parentNode.replaceChild(newChart, chart);
     var nc=$('chart'+pid);
 
-    nc.addEventListener('mousedown', function(e) {
+    nc.addEventListener('pointerdown', function(e) {
       if (G.actPid!==pid) return;
       var cell=e.target.closest('.hc');
       if (!cell) return;
       e.preventDefault();
+      nc.setPointerCapture(e.pointerId);
       var cr=+cell.dataset.r, cc=+cell.dataset.c;
       var cks=filteredCombosForCell(pid,cr,cc);
       // removing mode if ALL filtered combos for this cell are already selected
@@ -2542,9 +2544,10 @@ var RP = (function() {
       refreshDragHighlight();
     });
 
-    nc.addEventListener('mousemove', function(e) {
+    nc.addEventListener('pointermove', function(e) {
       if (!drag.on||drag.pid!==pid) return;
-      var cell=e.target.closest('.hc');
+      var el=document.elementFromPoint(e.clientX, e.clientY);
+      var cell=el && el.closest('.hc');
       if (!cell) return;
       if (selMode==='free') {
         var cr=+cell.dataset.r, cc=+cell.dataset.c;
@@ -2650,7 +2653,7 @@ var RP = (function() {
     }
   }
 
-  document.addEventListener('mouseup', function(e) {
+  document.addEventListener('pointerup', function(e) {
     if (!drag.on) return;
     drag.on=false;
     // Selection stays highlighted; click an action button to assign
